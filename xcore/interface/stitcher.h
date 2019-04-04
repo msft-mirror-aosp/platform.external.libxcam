@@ -70,6 +70,8 @@ struct CameraInfo {
     float             angle_range;;
 };
 
+class VKDevice;
+
 class Stitcher
 {
 public:
@@ -126,6 +128,8 @@ public:
     virtual ~Stitcher ();
     static SmartPtr<Stitcher> create_ocl_stitcher ();
     static SmartPtr<Stitcher> create_soft_stitcher ();
+    static SmartPtr<Stitcher> create_gl_stitcher ();
+    static SmartPtr<Stitcher> create_vk_stitcher (const SmartPtr<VKDevice> dev);
 
     bool set_bowl_config (const BowlDataConfig &config);
     const BowlDataConfig &get_bowl_config () {
@@ -153,11 +157,25 @@ public:
         _output_width = width; //XCAM_ALIGN_UP (width, XCAM_BLENDER_ALIGNED_WIDTH);
         _output_height = height;
     }
-
     void get_output_size (uint32_t &width, uint32_t &height) const {
         width = _output_width;
         height = _output_height;
     }
+
+    void set_scale_mode (GeoMapScaleMode scale_mode) {
+        _scale_mode = scale_mode;
+    }
+    GeoMapScaleMode get_scale_mode () {
+        return _scale_mode;
+    }
+
+    void set_fm_mode (FeatureMatchMode fm_mode) {
+        _fm_mode = fm_mode;
+    }
+    FeatureMatchMode get_fm_mode () {
+        return _fm_mode;
+    }
+
     virtual XCamReturn stitch_buffers (const VideoBufferList &in_bufs, SmartPtr<VideoBuffer> &out_buf) = 0;
 
 protected:
@@ -186,12 +204,6 @@ protected:
 private:
     XCAM_DEAD_COPY (Stitcher);
 
-protected:
-    ImageCropInfo               _crop_info[XCAM_STITCH_MAX_CAMERAS];
-    bool                        _is_crop_set;
-    //update after each feature match
-    ScaleFactor                 _scale_factors[XCAM_STITCH_MAX_CAMERAS];
-
 private:
     uint32_t                    _alignment_x, _alignment_y;
     uint32_t                    _output_width, _output_height;
@@ -205,10 +217,19 @@ private:
     BowlDataConfig              _bowl_config;
     bool                        _is_overlap_set;
 
+    ImageCropInfo               _crop_info[XCAM_STITCH_MAX_CAMERAS];
+    bool                        _is_crop_set;
+
     //auto calculation
     CenterMark                  _center_marks[XCAM_STITCH_MAX_CAMERAS];
     bool                        _is_center_marked;
     CopyAreaArray               _copy_areas;
+
+    GeoMapScaleMode             _scale_mode;
+    //update after each feature match
+    ScaleFactor                 _scale_factors[XCAM_STITCH_MAX_CAMERAS];
+
+    FeatureMatchMode            _fm_mode;
 };
 
 class BowlModel {

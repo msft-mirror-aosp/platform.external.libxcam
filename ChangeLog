@@ -1,3 +1,68 @@
+2019/04/02: release libxcam version 1.2.2
+ * DNN inference framwork enabling.
+   - enable pedestrian and vehicle detection based on OpenVino
+
+ * OpenCV feature match enabled for image stitching pipeline (GLES/Vulkan/CPU)
+   - support three versions of feature match: default, cluster, capi
+
+ * Abstract OpenCV source in ocv module, and build into a separate static library
+
+2018/12/19: release libxcam version 1.2.1
+ * Vulkan surround-view stitching enabling.
+   - enable features of multi-band blender and geometry remap.
+   - enable Vulkan image stitching. (feature-match may support later)
+
+ * Surrond-view texture rendering.
+   - enable 3D surround view scene rendering and manipulation.
+
+ * require OpenSceneGraph minimal version 3.3.2
+
+2018/10/16: release libxcam version 1.2.0
+ * GLES compute framework enabling.
+   - enable GL image processing framework.
+   - enable features of multi-band blender, geometry remap and data-copy.
+
+ * GLES surround-view stitching enabling.
+   - GLES stitching enabled (feature-match may support later).
+   - performance optimized on compute shaders.
+
+ * Vulkan compute framework enabling.
+   - enabled Vulkan image processing under xcam framework.
+   - vk-copy-handler as sample code.
+
+ * suggest OpenCV version [3.0.0 - 3.4.3]
+ * support CPU stitching based on dual-const and dual-curve scaling factors.
+ * support OpenCL stitching based on auto-scale in vertical 2D-direction.
+ * change test-soft-image to test-surround-view
+
+2018/03/01: release libxcam version 1.1.0
+ * CPU stitching enabled for automotive surround view in Linux/Android.
+   - enable CPU multi-thread image processing framework.
+   - enable multi-band blender, geometry remap, data-copy, OpenCV feature match.
+   - enable 3D-bowl model stitching.
+   - support generic Android platform.
+   - CPU version of surround view stitching upstream to Android Open Source Project.
+
+ * surround-view OpenCL stitching feature enabled and quality improvement.
+   - add dewarp process based on bowl view model in geometry map.
+   - support multiple (4) cameras stitching.
+   - add new selection method based on clustering in feature match to improve quality of stitching.
+   - auto scale in x direction is done and y direction is WIP.
+   - quality tune on different datasets, both indoor and outdoor.
+
+ * support standard OpenCL 2.0+ driver (VPG OCL driver)
+   - support standard OpenCL buffer.
+   - remove libdrm dependency.
+   - drm preview removed from test-device-manager, test-pipe-manager and usb camera.
+
+ * enable deblurring feature based on OpenCV. (GSoC program)
+   - based on deconvolution algorithm filters
+   - support noise estimation
+   - support edgetaper
+
+ * sourround view solution will be integrated into Android EVS (exterior view system) WIP
+ * add sample recipe for yocto build (libxcam/doc/yocto).
+
 2017/07/10: release libxcam version 1.0.0
  * 360 video stitching performance and quality improvement.
    - enable geometry map to improve performance.

@@ -31,6 +31,19 @@ enum SurroundMode {
     BowlView = 1
 };
 
+enum FeatureMatchMode {
+    FMNone = 0,
+    FMDefault,
+    FMCluster,
+    FMCapi
+};
+
+enum GeoMapScaleMode {
+    ScaleSingleConst = 0,
+    ScaleDualConst,
+    ScaleDualCurve
+};
+
 struct Rect {
     int32_t pos_x, pos_y;
     int32_t width, height;

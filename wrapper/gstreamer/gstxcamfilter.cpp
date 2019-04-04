@@ -42,7 +42,6 @@ using namespace GstXCam;
 #define DEFAULT_PROP_STITCH_SCALE_MODE      CLBlenderScaleLocal
 #define DEFAULT_PROP_STITCH_FISHEYE_MAP     FALSE
 #define DEFAULT_PROP_STITCH_LSC             FALSE
-#define DEFAULT_PROP_STITCH_FM_OCL          FALSE
 #define DEFAULT_PROP_STITCH_RES_MODE        StitchRes1080P
 
 XCAM_BEGIN_DECLARE
@@ -61,7 +60,6 @@ enum {
     PROP_STITCH_SCALE_MODE,
     PROP_STITCH_FISHEYE_MAP,
     PROP_STITCH_LSC,
-    PROP_STITCH_FM_OCL,
     PROP_STITCH_RES_MODE
 };
 
@@ -307,13 +305,6 @@ gst_xcam_filter_class_init (GstXCamFilterClass *class_self)
         g_param_spec_boolean ("stitch-lsc", "stitch enable lens shading correction", "Enable Lens Shading Correction",
                               DEFAULT_PROP_STITCH_LSC, (GParamFlags)(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
 
-#if HAVE_OPENCV
-    g_object_class_install_property (
-        gobject_class, PROP_STITCH_FM_OCL,
-        g_param_spec_boolean ("stitch-fm-ocl", "stitch enable ocl for feature match", "Enable ocl for feature match",
-                              DEFAULT_PROP_STITCH_FM_OCL, (GParamFlags)(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
-#endif
-
     g_object_class_install_property (
         gobject_class, PROP_STITCH_RES_MODE,
         g_param_spec_enum ("stitch-res-mode", "stitch resolution mode", "Stitch Resolution Mode",
@@ -355,7 +346,6 @@ gst_xcam_filter_init (GstXCamFilter *xcamfilter)
     xcamfilter->stitch_enable_seam = DEFAULT_PROP_STITCH_ENABLE_SEAM;
     xcamfilter->stitch_fisheye_map = DEFAULT_PROP_STITCH_FISHEYE_MAP;
     xcamfilter->stitch_lsc = DEFAULT_PROP_STITCH_LSC;
-    xcamfilter->stitch_fm_ocl = DEFAULT_PROP_STITCH_FM_OCL;
     xcamfilter->stitch_scale_mode = DEFAULT_PROP_STITCH_SCALE_MODE;
     xcamfilter->stitch_res_mode = DEFAULT_PROP_STITCH_RES_MODE;
 
@@ -363,8 +353,9 @@ gst_xcam_filter_init (GstXCamFilter *xcamfilter)
     xcamfilter->cached_buf_num = 0;
 
     XCAM_CONSTRUCTOR (xcamfilter->pipe_manager, SmartPtr<MainPipeManager>);
-    xcamfilter->pipe_manager = new MainPipeManager;
-    XCAM_ASSERT (xcamfilter->pipe_manager.ptr ());
+    SmartPtr<MainPipeManager> pipe_manager = new MainPipeManager;
+    XCAM_ASSERT (pipe_manager.ptr ());
+    xcamfilter->pipe_manager = pipe_manager;
 }
 
 static void
@@ -423,11 +414,6 @@ gst_xcam_filter_set_property (GObject *object, guint prop_id, const GValue *valu
     case PROP_STITCH_LSC:
         xcamfilter->stitch_lsc = g_value_get_boolean (value);
         break;
-#if HAVE_OPENCV
-    case PROP_STITCH_FM_OCL:
-        xcamfilter->stitch_fm_ocl = g_value_get_boolean (value);
-        break;
-#endif
     case PROP_STITCH_RES_MODE:
         xcamfilter->stitch_res_mode = (StitchResMode) g_value_get_enum (value);
         break;
@@ -479,11 +465,6 @@ gst_xcam_filter_get_property (GObject *object, guint prop_id, GValue *value, GPa
     case PROP_STITCH_LSC:
         g_value_set_boolean (value, xcamfilter->stitch_lsc);
         break;
-#if HAVE_OPENCV
-    case PROP_STITCH_FM_OCL:
-        g_value_set_boolean (value, xcamfilter->stitch_fm_ocl);
-        break;
-#endif
     case PROP_STITCH_RES_MODE:
         g_value_set_enum (value, xcamfilter->stitch_res_mode);
         break;
@@ -508,7 +489,6 @@ gst_xcam_filter_start (GstBaseTransform *trans)
 
     SmartPtr<MainPipeManager> pipe_manager = xcamfilter->pipe_manager;
     SmartPtr<SmartAnalyzer> smart_analyzer;
-    SmartPtr<CLPostImageProcessor> image_processor;
 
     SmartHandlerList smart_handlers = SmartAnalyzerLoader::load_smart_handlers (DEFAULT_SMART_ANALYSIS_LIB_DIR);
     if (!smart_handlers.empty ()) {
@@ -530,7 +510,7 @@ gst_xcam_filter_start (GstBaseTransform *trans)
         }
     }
 
-    image_processor = new CLPostImageProcessor ();
+    SmartPtr<CLPostImageProcessor> image_processor = new CLPostImageProcessor ();
     XCAM_ASSERT (image_processor.ptr ());
     image_processor->set_stats_callback (pipe_manager);
     image_processor->set_defog_mode ((CLPostImageProcessor::CLDefogMode) xcamfilter->defog_mode);
@@ -571,8 +551,10 @@ gst_xcam_filter_start (GstBaseTransform *trans)
     pipe_manager->add_image_processor (image_processor);
     pipe_manager->set_image_processor (image_processor);
 
-    xcamfilter->buf_pool = new CLVideoBufferPool ();
-    XCAM_ASSERT (xcamfilter->buf_pool.ptr ());
+    SmartPtr<BufferPool> pool = new CLVideoBufferPool ();
+    XCAM_ASSERT (pool.ptr ());
+    xcamfilter->buf_pool = pool;
+
     if (xcamfilter->copy_mode == COPY_MODE_DMA) {
         XCAM_LOG_WARNING ("CLVideoBuffer doesn't support DMA copy mode, switch to CPU copy mode");
         xcamfilter->copy_mode = COPY_MODE_CPU;
@@ -735,8 +717,8 @@ gst_xcam_filter_set_caps (GstBaseTransform *trans, GstCaps *incaps, GstCaps *out
     if (xcamfilter->enable_stitch) {
         processor->set_image_stitch (
             xcamfilter->enable_stitch, xcamfilter->stitch_enable_seam, xcamfilter->stitch_scale_mode,
-            xcamfilter->stitch_fisheye_map, xcamfilter->stitch_lsc, xcamfilter->stitch_fm_ocl,
-            GST_VIDEO_INFO_WIDTH (&out_info), GST_VIDEO_INFO_HEIGHT (&out_info), (uint32_t) xcamfilter->stitch_res_mode);
+            xcamfilter->stitch_fisheye_map, xcamfilter->stitch_lsc, GST_VIDEO_INFO_WIDTH (&out_info),
+            GST_VIDEO_INFO_HEIGHT (&out_info), (uint32_t) xcamfilter->stitch_res_mode);
         XCAM_LOG_INFO ("xcamfilter stitch output size width:%d height:%d",
                        GST_VIDEO_INFO_WIDTH (&out_info), GST_VIDEO_INFO_HEIGHT (&out_info));
     }
@@ -1001,5 +983,5 @@ GST_PLUGIN_DEFINE (
     VERSION,
     GST_LICENSE_UNKNOWN,
     "libxcamfilter",
-    "https://github.com/01org/libxcam"
+    "https://github.com/intel/libxcam"
 )

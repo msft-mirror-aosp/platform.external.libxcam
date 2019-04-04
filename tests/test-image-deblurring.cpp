@@ -25,9 +25,9 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <image_file_handle.h>
-#include <ocl/cv_image_sharp.h>
-#include <ocl/cv_wiener_filter.h>
-#include <ocl/cv_image_deblurring.h>
+#include "ocv/cv_image_sharp.h"
+#include "ocv/cv_wiener_filter.h"
+#include "ocv/cv_image_deblurring.h"
 
 #include <opencv2/opencv.hpp>
 #include <opencv2/core/ocl.hpp>
@@ -58,7 +58,7 @@ static void
 non_blind_deblurring (cv::Mat &input_image, cv::Mat &output_image)
 {
     SmartPtr<CVWienerFilter> wiener_filter = new CVWienerFilter ();
-    cv::cvtColor (input_image, input_image, CV_BGR2GRAY);
+    cv::cvtColor (input_image, input_image, cv::COLOR_BGR2GRAY);
     // use simple motion blur kernel
     int kernel_size = 13;
     cv::Mat kernel = cv::Mat::zeros (kernel_size, kernel_size, CV_32FC1);
@@ -115,7 +115,7 @@ int main (int argc, char *argv[])
             break;
         case 'H':
             usage (argv[0]);
-            return -1;
+            return 0;
         default:
             printf ("getopt_long return unknown value:%c\n", opt);
             usage (argv[0]);
@@ -144,12 +144,12 @@ int main (int argc, char *argv[])
     printf ("----------------------\n");
 
     SmartPtr<CVImageSharp> sharp = new CVImageSharp ();
-    cv::Mat input_image = cv::imread (file_in_name, CV_LOAD_IMAGE_COLOR);
+    cv::Mat input_image = cv::imread (file_in_name, cv::IMREAD_COLOR);
     cv::Mat output_image;
     if (input_image.empty ())
     {
         XCAM_LOG_ERROR ("input file read error");
-        return 0;
+        return -1;
     }
     if (blind)
     {
@@ -166,5 +166,7 @@ int main (int argc, char *argv[])
         cv::imwrite (file_out_name, output_image);
     }
     XCAM_ASSERT (output_sharp > input_sharp);
+
+    return 0;
 }
 

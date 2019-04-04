@@ -24,6 +24,7 @@
 
 #include <unistd.h>
 #include <getopt.h>
+#include <string>
 
 #define TEST_CAMERA_POSITION_OFFSET_X 2000
 
@@ -60,6 +61,8 @@
 #define DEFAULT_HYBRID_3A_LIB "/usr/lib/xcam/plugins/3a/libxcam_3a_hybrid.so"
 #define DEFAULT_SMART_ANALYSIS_LIB_DIR "/usr/lib/xcam/plugins/smart"
 
+#define FISHEYE_CONFIG_PATH "./calib_params/"
+#define FISHEYE_CONFIG_ENV_VAR "FISHEYE_CONFIG_PATH"
 
 #define FPS_CALCULATION(objname, count) XCAM_STATIC_FPS_CALCULATION(objname, count)
 

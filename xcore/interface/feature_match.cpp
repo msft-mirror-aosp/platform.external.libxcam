@@ -27,23 +27,13 @@ namespace XCam {
 
 FeatureMatch::FeatureMatch ()
     : _x_offset (0.0f)
+    , _y_offset (0.0f)
     , _mean_offset (0.0f)
+    , _mean_offset_y (0.0f)
     , _valid_count (0)
     , _fm_idx (-1)
     , _frame_num (0)
 {
-}
-
-void
-FeatureMatch::set_config (CVFMConfig config)
-{
-    _config = config;
-}
-
-CVFMConfig
-FeatureMatch::get_config ()
-{
-    return _config;
 }
 
 void
@@ -53,16 +43,67 @@ FeatureMatch::set_fm_index (int idx)
 }
 
 void
+FeatureMatch::set_config (const FMConfig &config)
+{
+    _config = config;
+}
+
+void
+FeatureMatch::set_crop_rect (const Rect &left_rect, const Rect &right_rect)
+{
+    _left_rect = left_rect;
+    _right_rect = right_rect;
+}
+
+void
+FeatureMatch::get_crop_rect (Rect &left_rect, Rect &right_rect)
+{
+    left_rect = _left_rect;
+    right_rect = _right_rect;
+}
+
+void
 FeatureMatch::reset_offsets ()
 {
     _x_offset = 0.0f;
+    _y_offset = 0.0f;
     _mean_offset = 0.0f;
+    _mean_offset_y = 0.0f;
+}
+
+float
+FeatureMatch::get_current_left_offset_x ()
+{
+    return _x_offset;
+}
+
+float
+FeatureMatch::get_current_left_offset_y ()
+{
+    return _y_offset;
+}
+
+void
+FeatureMatch::set_dst_width (int width)
+{
+    XCAM_UNUSED (width);
+
+    XCAM_LOG_ERROR ("dst width is not supported");
+    XCAM_ASSERT (false);
+}
+
+void
+FeatureMatch::enable_adjust_crop_area ()
+{
+    XCAM_LOG_ERROR ("adjust crop area is not supported");
+    XCAM_ASSERT (false);
 }
 
 bool
-FeatureMatch::get_mean_offset (std::vector<float> &offsets, float sum, int &count, float &mean_offset)
+FeatureMatch::get_mean_offset (
+    const std::vector<float> &offsets, float sum, int &count, float &mean_offset)
 {
-    if (count < _config.min_corners)
+    if (count < _config.min_corners || count <= 0)
         return false;
 
     mean_offset = sum / count;
@@ -87,7 +128,7 @@ FeatureMatch::get_mean_offset (std::vector<float> &offsets, float sum, int &coun
             ++recur_count;
         }
 
-        if (recur_count < _config.min_corners) {
+        if (recur_count < _config.min_corners || recur_count <= 0) {
             ret = false;
             break;
         }
@@ -113,31 +154,6 @@ FeatureMatch::get_mean_offset (std::vector<float> &offsets, float sum, int &coun
     }
 
     return ret;
-}
-
-void
-FeatureMatch::adjust_stitch_area (int dst_width, float &x_offset, Rect &stitch0, Rect &stitch1)
-{
-    if (fabs (x_offset) < 5.0f)
-        return;
-
-    int last_overlap_width = stitch1.pos_x + stitch1.width + (dst_width - (stitch0.pos_x + stitch0.width));
-    // int final_overlap_width = stitch1.pos_x + stitch1.width + (dst_width - (stitch0.pos_x - x_offset + stitch0.width));
-    if ((stitch0.pos_x - x_offset + stitch0.width) > dst_width)
-        x_offset = dst_width - (stitch0.pos_x + stitch0.width);
-    int final_overlap_width = last_overlap_width + x_offset;
-    final_overlap_width = XCAM_ALIGN_AROUND (final_overlap_width, 8);
-    XCAM_ASSERT (final_overlap_width >= _config.sitch_min_width);
-    int center = final_overlap_width / 2;
-    XCAM_ASSERT (center >= _config.sitch_min_width / 2);
-
-    stitch1.pos_x = XCAM_ALIGN_AROUND (center - _config.sitch_min_width / 2, 8);
-    stitch1.width = _config.sitch_min_width;
-    stitch0.pos_x = dst_width - final_overlap_width + stitch1.pos_x;
-    stitch0.width = _config.sitch_min_width;
-
-    float delta_offset = final_overlap_width - last_overlap_width;
-    x_offset -= delta_offset;
 }
 
 }

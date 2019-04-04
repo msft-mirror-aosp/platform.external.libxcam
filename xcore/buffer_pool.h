@@ -67,6 +67,9 @@ protected:
     SmartPtr<BufferData> &get_buffer_data () {
         return _data;
     }
+    const SmartPtr<BufferData> &get_buffer_data () const {
+        return _data;
+    }
 
 private:
     XCAM_DEAD_COPY (BufferProxy);
@@ -125,6 +128,9 @@ private:
     uint32_t                 _max_count;
     bool                     _started;
 };
+
+class VKDevice;
+SmartPtr<BufferPool> create_vk_buffer_pool (const SmartPtr<VKDevice> &dev);
 
 };
 

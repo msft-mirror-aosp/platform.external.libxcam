@@ -49,7 +49,7 @@ class CLFisheyeHandler
 {
     friend class CLFisheye2GPSKernel;
 public:
-    explicit CLFisheyeHandler (const SmartPtr<CLContext> &context, SurroundMode surround_mode, bool use_map, bool need_lsc);
+    explicit CLFisheyeHandler (const SmartPtr<CLContext> &context, SurroundMode surround_mode, bool use_map, bool need_lsc, bool need_scale);
     virtual ~CLFisheyeHandler();
 
     void set_output_size (uint32_t width, uint32_t height);
@@ -65,9 +65,25 @@ public:
     void set_lsc_table (float *table, uint32_t table_size);
     void set_lsc_gray_threshold (float min_threshold, float max_threshold);
 
+    void set_stable_y_start (float y_start);
+    virtual float get_stable_y_start () {
+        return _stable_y_start;
+    }
+
+    void set_left_scale_factor (PointFloat2 factor);
+    void set_right_scale_factor (PointFloat2 factor);
+
+    virtual PointFloat2 get_left_scale_factor () {
+        return _left_scale_factor;
+    }
+    virtual PointFloat2 get_right_scale_factor () {
+        return _right_scale_factor;
+    }
+
     void set_bowl_config(const BowlDataConfig bowl_data_config) {
         _bowl_data_config = bowl_data_config;
     }
+
     const BowlDataConfig &get_bowl_config() {
         return _bowl_data_config;
     }
@@ -137,9 +153,14 @@ private:
     float                            _map_factor;
     bool                             _use_map;
     uint32_t                         _need_lsc;
+    uint32_t                         _need_scale;
     uint32_t                         _lsc_array_size;
     float                            _gray_threshold[2];  // [min_gray_threshold, max_gray_threshold]
     float                            *_lsc_array;
+    float                            _stable_y_start;
+
+    PointFloat2                      _left_scale_factor;
+    PointFloat2                      _right_scale_factor;
 
     BowlDataConfig                   _bowl_data_config;
 
@@ -155,7 +176,7 @@ private:
 };
 
 SmartPtr<CLImageHandler>
-create_fisheye_handler (const SmartPtr<CLContext> &context, SurroundMode surround_mode = SphereView, bool use_map = false, bool need_lsc = false);
+create_fisheye_handler (const SmartPtr<CLContext> &context, SurroundMode surround_mode = SphereView, bool use_map = false, bool need_lsc = false, bool need_scale = false);
 
 }
 

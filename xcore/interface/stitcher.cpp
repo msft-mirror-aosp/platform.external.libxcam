@@ -77,8 +77,7 @@ split_area_by_out (
 }
 
 Stitcher::Stitcher (uint32_t align_x, uint32_t align_y)
-    : _is_crop_set (false)
-    , _alignment_x (align_x)
+    : _alignment_x (align_x)
     , _alignment_y (align_y)
     , _output_width (0)
     , _output_height (0)
@@ -86,7 +85,10 @@ Stitcher::Stitcher (uint32_t align_x, uint32_t align_y)
     , _camera_num (0)
     , _is_round_view_set (false)
     , _is_overlap_set (false)
+    , _is_crop_set (false)
     , _is_center_marked (false)
+    , _scale_mode (ScaleSingleConst)
+    , _fm_mode (FMNone)
 {
     XCAM_ASSERT (align_x >= 1);
     XCAM_ASSERT (align_y >= 1);
@@ -629,7 +631,7 @@ BowlModel::get_stitch_image_vertex_model (
 
             vertices.push_back (PointFloat3(world_pos0.x / _config.a, world_pos0.y / _config.b, world_pos0.z / _config.c));
             indeices.push_back (indicator++);
-            texture_points.push_back (PointFloat2(texture_pos0.x / _bowl_img_width, (_bowl_img_height - texture_pos0.y) / _bowl_img_height));
+            texture_points.push_back (PointFloat2(texture_pos0.x / _bowl_img_width, texture_pos0.y / _bowl_img_height));
 
             PointFloat3 world_pos1 =
                 bowl_view_image_to_world (
@@ -637,7 +639,7 @@ BowlModel::get_stitch_image_vertex_model (
 
             vertices.push_back (PointFloat3(world_pos1.x / _config.a, world_pos1.y / _config.b, world_pos1.z / _config.c));
             indeices.push_back (indicator++);
-            texture_points.push_back (PointFloat2(texture_pos1.x / _bowl_img_width, (_bowl_img_height - texture_pos1.y) / _bowl_img_height));
+            texture_points.push_back (PointFloat2(texture_pos1.x / _bowl_img_width, texture_pos1.y / _bowl_img_height));
         }
     }
     return true;

@@ -66,6 +66,8 @@ public:
         const SmartPtr<CLContext> &context, CLBlenderScaleMode scale_mode, SurroundMode surround_mode,
         StitchResMode res_mode, int fisheye_num, bool all_in_one_img);
 
+    void set_feature_match (bool enable);
+
     bool set_stitch_info (StitchInfo stitch_info);
     StitchInfo get_stitch_info ();
     void set_output_size (uint32_t width, uint32_t height) {
@@ -94,12 +96,6 @@ public:
         return _scale_global_output;
     }
 
-    void set_feature_match_ocl (bool use_ocl);
-#if HAVE_OPENCV
-    void set_feature_match_config (const int idx, CVFMConfig config);
-    CVFMConfig get_feature_match_config (const int idx);
-#endif
-
 protected:
     virtual XCamReturn prepare_buffer_pool_video_info (const VideoBufferInfo &input, VideoBufferInfo &output);
     virtual XCamReturn prepare_parameters (SmartPtr<VideoBuffer> &input, SmartPtr<VideoBuffer> &output);
@@ -121,13 +117,19 @@ protected:
     void update_image_overlap ();
 
 private:
+    void init_opencv_ocl ();
+    void init_feature_match ();
+    void update_scale_factors (uint32_t fm_idx, const Rect &crop_left, const Rect &crop_right);
+    void set_fm_buf_mem (
+        const SmartPtr<VideoBuffer> &buf_left, const SmartPtr<VideoBuffer> &buf_right, int fm_idx);
+
+private:
     XCAM_DEAD_COPY (CLImage360Stitch);
 
 private:
     SmartPtr<CLContext>         _context;
     CLFisheyeParams             _fisheye[XCAM_STITCH_FISHEYE_MAX_NUM];
     SmartPtr<CLBlender>         _blender[XCAM_STITCH_FISHEYE_MAX_NUM];
-    SmartPtr<FeatureMatch>      _feature_match[XCAM_STITCH_FISHEYE_MAX_NUM];
 
     uint32_t                    _output_width;
     uint32_t                    _output_height;
@@ -141,6 +143,9 @@ private:
 
     SurroundMode                _surround_mode;
     StitchResMode               _res_mode;
+
+    bool                        _enable_fm;
+    SmartPtr<FeatureMatch>      _feature_match[XCAM_STITCH_FISHEYE_MAX_NUM];
 
     bool                        _is_stitch_inited;
     int                         _fisheye_num;

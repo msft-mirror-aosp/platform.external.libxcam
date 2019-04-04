@@ -27,10 +27,6 @@
 
 namespace XCam {
 
-#ifndef PI
-#define PI 3.14159265358979323846
-#endif
-
 #ifndef FLT_EPSILON
 #define FLT_EPSILON 1.19209290e-07F // float
 #endif
@@ -40,11 +36,11 @@ namespace XCam {
 #endif
 
 #ifndef DEGREE_2_RADIANS
-#define DEGREE_2_RADIANS(x) (((x) * PI) / 180.0)
+#define DEGREE_2_RADIANS(x) (((x) * XCAM_PI) / 180.0)
 #endif
 
 #ifndef RADIANS_2_DEGREE
-#define RADIANS_2_DEGREE(x) (((x) * 180.0) / PI)
+#define RADIANS_2_DEGREE(x) (((x) * 180.0) / XCAM_PI)
 #endif
 
 #define XCAM_VECT2_OPERATOR_VECT2(op)                       \
@@ -157,11 +153,11 @@ public:
     inline bool operator == (const VectorN<T, N>& rhs) const;
 
     inline T& operator [] (uint32_t index) {
-        XCAM_ASSERT(index >= 0 && index < N);
+        XCAM_ASSERT(index < N);
         return data[index];
     }
     inline const T& operator [] (uint32_t index) const {
-        XCAM_ASSERT(index >= 0 && index < N);
+        XCAM_ASSERT(index < N);
         return data[index];
     }
 
@@ -521,15 +517,11 @@ public:
     inline void eye ();
 
     inline T& at (uint32_t row, uint32_t col) {
-        XCAM_ASSERT(row >= 0 && row < N);
-        XCAM_ASSERT(col >= 0 && col < N);
-
+        XCAM_ASSERT(row < N && col < N);
         return data[row * N + col];
     };
     inline const T& at (uint32_t row, uint32_t col) const {
-        XCAM_ASSERT(row >= 0 && row < N);
-        XCAM_ASSERT(col >= 0 && col < N);
-
+        XCAM_ASSERT(row < N && col < N);
         return data[row * N + col];
     };
 

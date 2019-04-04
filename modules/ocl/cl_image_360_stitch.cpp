@@ -19,9 +19,12 @@
  */
 
 #include "cl_utils.h"
+#include "cl_device.h"
 #include "cl_image_360_stitch.h"
 #if HAVE_OPENCV
-#include "cv_feature_match.h"
+#include "ocv/cv_feature_match.h"
+#include "ocv/cv_feature_match_cluster.h"
+#include <opencv2/core/ocl.hpp>
 #endif
 
 #define XCAM_BLENDER_GLOBAL_SCALE_EXT_WIDTH 64
@@ -109,10 +112,10 @@ CLBlenderGlobalScaleKernel::get_output_info (
 }
 
 #if HAVE_OPENCV
-static CVFMConfig
-get_fm_default_config (StitchResMode res_mode)
+static FMConfig
+get_fm_sphere_config (StitchResMode res_mode)
 {
-    CVFMConfig config;
+    FMConfig config;
 
     switch (res_mode) {
     case StitchRes1080P: {
@@ -155,6 +158,22 @@ get_fm_default_config (StitchResMode res_mode)
         XCAM_LOG_DEBUG ("unknown reslution mode (%d)", res_mode);
         break;
     }
+
+    return config;
+}
+
+static FMConfig
+get_fm_bowl_config ()
+{
+    FMConfig config;
+    config.sitch_min_width = 136;
+    config.min_corners = 4;
+    config.offset_factor = 0.95f;
+    config.delta_mean_offset = 120.0f;
+    config.recur_offset_error = 8.0f;
+    config.max_adjusted_offset = 24.0f;
+    config.max_valid_offset_y = 20.0f;
+    config.max_track_error = 28.0f;
 
     return config;
 }
@@ -280,17 +299,25 @@ CLImage360Stitch::CLImage360Stitch (
     , _scale_mode (scale_mode)
     , _surround_mode (surround_mode)
     , _res_mode (res_mode)
+    , _enable_fm (true)
     , _is_stitch_inited (false)
     , _fisheye_num (fisheye_num)
     , _all_in_one_img (all_in_one_img)
 {
+#if !HAVE_OPENCV
+    _enable_fm = false;
+#endif
+}
+
+void
+CLImage360Stitch::set_feature_match (bool enable)
+{
 #if HAVE_OPENCV
-    for (int i = 0; i < fisheye_num; i++) {
-        _feature_match[i] = new CVFeatureMatch ();
-        XCAM_ASSERT (_feature_match[i].ptr ());
-        _feature_match[i]->set_config (get_fm_default_config (res_mode));
-        _feature_match[i]->set_fm_index (i);
-    }
+    _enable_fm = enable;
+#else
+    if (enable)
+        XCAM_LOG_WARNING ("non-OpenCV mode, feature match is unsupported, disable feature match");
+    _enable_fm = false;
 #endif
 }
 
@@ -371,33 +398,6 @@ CLImage360Stitch::set_image_overlap (const int idx, const Rect &overlap0, const 
 }
 
 void
-CLImage360Stitch::set_feature_match_ocl (bool fm_ocl)
-{
-#if HAVE_OPENCV
-    for (int i = 0; i < _fisheye_num; i++) {
-        _feature_match[i]->set_ocl (fm_ocl);
-    }
-#else
-    XCAM_UNUSED (fm_ocl);
-    XCAM_LOG_WARNING ("non-OpenCV mode, failed to set ocl for feature match");
-#endif
-}
-
-#if HAVE_OPENCV
-void
-CLImage360Stitch::set_feature_match_config (const int idx, CVFMConfig config)
-{
-    _feature_match[idx]->set_config (config);
-}
-
-CVFMConfig
-CLImage360Stitch::get_feature_match_config (const int idx)
-{
-    return _feature_match[idx]->get_config ();
-}
-#endif
-
-void
 CLImage360Stitch::calc_fisheye_initial_info (SmartPtr<VideoBuffer> &output)
 {
     const VideoBufferInfo &out_info = output->get_video_info ();
@@ -431,23 +431,15 @@ CLImage360Stitch::calc_fisheye_initial_info (SmartPtr<VideoBuffer> &output)
     } else {
         _fisheye[0].height = out_info.height + _stitch_info.crop[0].top + _stitch_info.crop[0].bottom;
 
-        float view_angle[XCAM_STITCH_FISHEYE_MAX_NUM];
+        float view_angle[XCAM_STITCH_FISHEYE_MAX_NUM] = {
+            64.0f, 158.0f, 60.0f, 158.0f
+        };
 
-        view_angle[0] = 68.0f;
-        _fisheye[0].width = view_angle[0] / 360.0f * out_info.width;
-        _fisheye[0].width = XCAM_ALIGN_UP (_fisheye[0].width, 32);
-
-        view_angle[1] = 152.0f;
-        _fisheye[1].width = view_angle[1] / 360.0f * out_info.width;
-        _fisheye[1].width = XCAM_ALIGN_UP (_fisheye[1].width, 32);
-
-        view_angle[2] = 68.0f;
-        _fisheye[2].width = view_angle[2] / 360.0f * out_info.width;
-        _fisheye[2].width = XCAM_ALIGN_UP (_fisheye[2].width, 32);
-
-        view_angle[3] = 152.0f;
-        _fisheye[3].width = view_angle[3] / 360.0f * out_info.width;
-        _fisheye[3].width = XCAM_ALIGN_UP (_fisheye[3].width, 32);
+        XCAM_ASSERT (_fisheye_num <= XCAM_STITCH_FISHEYE_MAX_NUM);
+        for (int i = 0; i < _fisheye_num; i++) {
+            _fisheye[i].width = view_angle[i] / 360.0f * out_info.width;
+            _fisheye[i].width = XCAM_ALIGN_UP (_fisheye[i].width, 32);
+        }
 
         XCAM_LOG_INFO (
             "fisheye correction output size width:%d height:%d",
@@ -465,13 +457,26 @@ CLImage360Stitch::calc_fisheye_initial_info (SmartPtr<VideoBuffer> &output)
             bowl_data_config[i].angle_end = angle_center + view_angle[i] / 2;
         }
 
+        float wall_image_height = bowl_data_config[0].wall_height /
+                                  (float)(bowl_data_config[0].wall_height + bowl_data_config[0].ground_length) *
+                                  _fisheye[0].height;
+        float stable_y_start = (wall_image_height + _fisheye[0].height ) / 2.0f;
+
+        if (stable_y_start < 0.5f)
+            stable_y_start = 1.0f;
+
         for(int i = 0; i < _fisheye_num; i++) {
+            _fisheye[i].handler->set_stable_y_start (stable_y_start);
             _fisheye[i].handler->set_bowl_config(bowl_data_config[i]);
             _fisheye[i].handler->set_output_size (_fisheye[i].width, _fisheye[i].height);
         }
 
-        for(int i = 0; i < _fisheye_num; i++) {
-            _stitch_info.merge_width[i] = XCAM_ALIGN_UP((uint32_t)(20.0f / 360.0f * out_info.width), 32);
+        int idx_next;
+        for (int i = 0; i < _fisheye_num; i++) {
+            idx_next = (i == (_fisheye_num - 1)) ? 0 : (i + 1);
+
+            _stitch_info.merge_width[idx_next] = _fisheye[i].width / 2 + _fisheye[idx_next].width / 2 - out_info.width / _fisheye_num;
+            _stitch_info.merge_width[idx_next] = XCAM_ALIGN_UP (_stitch_info.merge_width[idx_next], 32);
         }
     }
 }
@@ -677,13 +682,14 @@ CLImage360Stitch::create_buffer_pool (SmartPtr<BufferPool> &buf_pool, uint32_t w
     buf_info.init (V4L2_PIX_FMT_NV12, width, height,
                    XCAM_ALIGN_UP (width, 16), XCAM_ALIGN_UP (height, 16));
 
-    buf_pool = new CLVideoBufferPool ();
-    XCAM_ASSERT (buf_pool.ptr ());
-    buf_pool->set_video_info (buf_info);
-    if (!buf_pool->reserve (6)) {
+    SmartPtr<BufferPool> pool = new CLVideoBufferPool ();
+    XCAM_ASSERT (pool.ptr ());
+    pool->set_video_info (buf_info);
+    if (!pool->reserve (6)) {
         XCAM_LOG_ERROR ("CLImage360Stitch init buffer pool failed");
         return false;
     }
+    buf_pool = pool;
 
     return true;
 }
@@ -710,12 +716,63 @@ CLImage360Stitch::reset_buffer_info (SmartPtr<VideoBuffer> &input)
     return XCAM_RETURN_NO_ERROR;
 }
 
+void
+CLImage360Stitch::init_opencv_ocl ()
+{
+#if HAVE_OPENCV
+    if (!cv::ocl::haveOpenCL ()) {
+        XCAM_LOG_ERROR ("OpenCV does not support OpenCL");
+        XCAM_ASSERT (false);
+    }
+
+    char *platform_name = CLDevice::instance()->get_platform_name ();
+    cl_platform_id platform_id = CLDevice::instance()->get_platform_id ();
+    cl_device_id device_id = CLDevice::instance()->get_device_id ();
+    cl_context context_id = _context->get_context_id ();
+    cv::ocl::attachContext (platform_name, platform_id, context_id, device_id);
+    cv::ocl::setUseOpenCL (false);
+#else
+    XCAM_LOG_ERROR ("non-OpenCV mode, failed to initialize opencv ocl");
+#endif
+}
+
+void
+CLImage360Stitch::init_feature_match ()
+{
+#if HAVE_OPENCV
+    bool is_sphere = (_surround_mode == SphereView);
+    const FMConfig &config = is_sphere ? get_fm_sphere_config (_res_mode) : get_fm_bowl_config ();
+
+    for (int i = 0; i < _fisheye_num; i++) {
+        if (is_sphere) {
+            _feature_match[i] = FeatureMatch::create_default_feature_match ();
+            _feature_match[i]->enable_adjust_crop_area ();
+        } else {
+            _feature_match[i] = FeatureMatch::create_cluster_feature_match ();
+        }
+        XCAM_ASSERT (_feature_match[i].ptr ());
+
+        _feature_match[i]->set_fm_index (i);
+        _feature_match[i]->set_config (config);
+    }
+#else
+    XCAM_LOG_ERROR ("non-OpenCV mode, failed to initialize feature match");
+#endif
+}
+
 XCamReturn
 CLImage360Stitch::prepare_parameters (SmartPtr<VideoBuffer> &input, SmartPtr<VideoBuffer> &output)
 {
     XCamReturn ret = XCAM_RETURN_NO_ERROR;
-    if (!_is_stitch_inited)
+    if (!_is_stitch_inited) {
+#if HAVE_OPENCV
+        if (_enable_fm) {
+            init_opencv_ocl ();
+            init_feature_match ();
+        }
+#endif
         set_stitch_info (get_default_stitch_info (_res_mode));
+    }
 
     ret = ensure_fisheye_parameters (input, output);
     STITCH_CHECK (ret, "ensure fisheye parameters failed");
@@ -768,44 +825,106 @@ CLImage360Stitch::prepare_parameters (SmartPtr<VideoBuffer> &input, SmartPtr<Vid
 XCamReturn
 CLImage360Stitch::execute_done (SmartPtr<VideoBuffer> &output)
 {
-#if HAVE_OPENCV
-    for (int i = 0; i < _fisheye_num; i++) {
-        if (!_feature_match[i]->is_ocl_path ()) {
-            get_context ()->finish ();
-            break;
-        }
-    }
-#endif
-
-    _scale_global_input.release ();
-    _scale_global_output.release ();
-
+    get_context ()->finish ();
     return CLMultiImageHandler::execute_done (output);
 }
 
+void
+CLImage360Stitch::update_scale_factors (uint32_t fm_idx, const Rect &crop_left, const Rect &crop_right)
+{
+#if HAVE_OPENCV
+    float left_offsetx = _feature_match[fm_idx]->get_current_left_offset_x ();
+    float left_offsety = _feature_match[fm_idx]->get_current_left_offset_y ();
+    PointFloat2 left_factor, right_factor;
+
+    uint32_t left_idx = fm_idx;
+    float center_x = (float) _fisheye[left_idx].width / 2;
+    float feature_center_x = (float)crop_left.pos_x + crop_left.width / 2.0f;
+    float range = feature_center_x - center_x;
+    XCAM_ASSERT (range > 1.0f);
+    right_factor.x = (range + left_offsetx / 2.0f) / range;
+    right_factor.y = (_fisheye[left_idx].handler->get_stable_y_start () - left_offsety / 2.0f) /
+                     _fisheye[left_idx].handler->get_stable_y_start ();
+    XCAM_ASSERT (right_factor.x > 0.0f && right_factor.x < 2.0f);
+
+    uint32_t right_idx = (fm_idx + 1) % _fisheye_num;
+    center_x = (float)_fisheye[right_idx].width / 2;
+    feature_center_x = (float)crop_right.pos_x + crop_right.width / 2.0f;
+    range = center_x - feature_center_x;
+    XCAM_ASSERT (range > 1.0f);
+    left_factor.x = (range + left_offsetx / 2.0f) / range;
+    left_factor.y = (_fisheye[left_idx].handler->get_stable_y_start () + left_offsety / 2.0f) /
+                    _fisheye[left_idx].handler->get_stable_y_start ();
+    XCAM_ASSERT (left_factor.x > 0.0f && left_factor.x < 2.0f);
+
+    PointFloat2 last_left_factor, last_right_factor;
+    last_left_factor = _fisheye[right_idx].handler->get_left_scale_factor ();
+    last_right_factor = _fisheye[left_idx].handler->get_right_scale_factor ();
+
+    left_factor.x *= last_left_factor.x;
+    left_factor.y *= last_left_factor.y;
+    right_factor.x *= last_right_factor.x;
+    right_factor.y *= last_right_factor.y;
+
+    _fisheye[left_idx].handler->set_right_scale_factor (right_factor);
+    _fisheye[right_idx].handler->set_left_scale_factor (left_factor);
+#else
+    XCAM_LOG_ERROR ("non-OpenCV mode, failed to update scale factors");
+#endif
+}
+
+void
+CLImage360Stitch::set_fm_buf_mem (
+    const SmartPtr<VideoBuffer> &buf_left, const SmartPtr<VideoBuffer> &buf_right, int fm_idx)
+{
+#if HAVE_OPENCV
+    SmartPtr<CVFeatureMatch> fm = _feature_match[fm_idx].dynamic_cast_ptr<CVFeatureMatch> ();
+    XCAM_ASSERT (fm.ptr ());
+
+    SmartPtr<CLBuffer> cl_buf_left = convert_to_clbuffer (_context, buf_left);
+    SmartPtr<CLBuffer> cl_buf_right = convert_to_clbuffer (_context, buf_right);
+    XCAM_ASSERT (cl_buf_left.ptr () && cl_buf_left.ptr ());
+    cl_mem mem_left = cl_buf_left->get_mem_id ();
+    cl_mem mem_right = cl_buf_right->get_mem_id ();
+
+    fm->set_cl_buf_mem (mem_left, CVFeatureMatch::BufIdLeft);
+    fm->set_cl_buf_mem (mem_right, CVFeatureMatch::BufIdRight);
+#else
+    XCAM_LOG_ERROR ("non-OpenCV mode, failed to set feature match buffer memory");
+#endif
+}
+
+#if HAVE_OPENCV
 static void
-convert_to_stitch_rect (Rect xcam_rect, Rect &stitch_rect)
+convert_to_stitch_rect (const Rect &xcam_rect, Rect &stitch_rect, SurroundMode surround_mode)
 {
     stitch_rect.pos_x = xcam_rect.pos_x;
-    stitch_rect.pos_y = xcam_rect.pos_y + xcam_rect.height / 3;
     stitch_rect.width = xcam_rect.width;
-    stitch_rect.height = xcam_rect.height / 3;
+    if (surround_mode == SphereView) {
+        stitch_rect.pos_y = xcam_rect.pos_y + xcam_rect.height / 3;
+        stitch_rect.height = xcam_rect.height / 3;
+    } else {
+        stitch_rect.pos_y = xcam_rect.pos_y + xcam_rect.height / 5;
+        stitch_rect.height = xcam_rect.height / 2;
+    }
 }
 
 static void
-convert_to_xcam_rect (Rect stitch_rect, Rect &xcam_rect)
+convert_to_xcam_rect (const Rect &stitch_rect, Rect &xcam_rect)
 {
     xcam_rect.pos_x = stitch_rect.pos_x;
     xcam_rect.width = stitch_rect.width;
 }
-
+#endif
 
 XCamReturn
 CLImage360Stitch::sub_handler_execute_done (SmartPtr<CLImageHandler> &handler)
 {
 #if HAVE_OPENCV
-    XCAM_ASSERT (handler.ptr ());
+    if (!_enable_fm)
+        return XCAM_RETURN_NO_ERROR;
 
+    XCAM_ASSERT (handler.ptr ());
     if (handler.ptr () == _fisheye[_fisheye_num - 1].handler.ptr ()) {
         int idx_next = 1;
         Rect crop_left, crop_right;
@@ -813,14 +932,25 @@ CLImage360Stitch::sub_handler_execute_done (SmartPtr<CLImageHandler> &handler)
         for (int i = 0; i < _fisheye_num; i++) {
             idx_next = (i == (_fisheye_num - 1)) ? 0 : (i + 1);
 
-            convert_to_stitch_rect (_img_merge_info[i].right, crop_left);
-            convert_to_stitch_rect (_img_merge_info[idx_next].left, crop_right);
+            set_fm_buf_mem (_fisheye[i].buf, _fisheye[idx_next].buf, i);
 
-            _feature_match[i]->optical_flow_feature_match (
-                _fisheye[i].buf, _fisheye[idx_next].buf, crop_left, crop_right, _fisheye[i].width);
+            convert_to_stitch_rect (_img_merge_info[i].right, crop_left, _surround_mode);
+            convert_to_stitch_rect (_img_merge_info[idx_next].left, crop_right, _surround_mode);
+            if (_surround_mode == SphereView) {
+                _feature_match[i]->set_dst_width (_fisheye[i].width);
+                _feature_match[i]->set_crop_rect (crop_left, crop_right);
+                _feature_match[i]->feature_match (_fisheye[i].buf, _fisheye[idx_next].buf);
 
-            convert_to_xcam_rect (crop_left, _img_merge_info[i].right);
-            convert_to_xcam_rect (crop_right, _img_merge_info[idx_next].left);
+                _feature_match[i]->get_crop_rect (crop_left, crop_right);
+                convert_to_xcam_rect (crop_left, _img_merge_info[i].right);
+                convert_to_xcam_rect (crop_right, _img_merge_info[idx_next].left);
+            } else {
+                _feature_match[i]->reset_offsets ();
+                _feature_match[i]->set_crop_rect (crop_left, crop_right);
+                _feature_match[i]->feature_match (_fisheye[i].buf, _fisheye[idx_next].buf);
+
+                update_scale_factors (i, crop_left, crop_right);
+            }
         }
     }
 #else
@@ -871,8 +1001,10 @@ create_image_360_stitch (
         context, scale_mode, surround_mode, res_mode, fisheye_num, all_in_one_img);
     XCAM_ASSERT (stitch.ptr ());
 
+    bool need_scale = (surround_mode == BowlView) ? true : false;
+
     for (int index = 0; index < fisheye_num; ++index) {
-        fisheye = create_fisheye_handler (context, surround_mode, fisheye_map, need_lsc).dynamic_cast_ptr<CLFisheyeHandler> ();
+        fisheye = create_fisheye_handler (context, surround_mode, fisheye_map, need_lsc, need_scale).dynamic_cast_ptr<CLFisheyeHandler> ();
         XCAM_FAIL_RETURN (ERROR, fisheye.ptr (), NULL, "image_360_stitch create fisheye handler failed");
         fisheye->disable_buf_pool (true);
         stitch->set_fisheye_handler (fisheye, index);

@@ -1,6 +1,6 @@
 SUMMARY = "Libxcam"
 DESCRIPTION = "Libxcam: Extended camera features and cross platform computer vision project"
-HOMEPAGE = "https://github.com/01org/libxcam/wiki"
+HOMEPAGE = "https://github.com/intel/libxcam/wiki"
 LICENSE = "Apache-2.0"
 
 PR = "r0"
@@ -8,7 +8,7 @@ S = "${WORKDIR}/git"
 
 LIC_FILES_CHKSUM = "file://${S}/LICENSE;md5=a739187a9544e0731270d11a8f5be792"
 
-SRC_URI = "git://github.com/01org/libxcam.git;branch=master"
+SRC_URI = "git://github.com/intel/libxcam.git;branch=master"
 SRCREV = "${AUTOREV}"
 
 DEPENDS = "glib-2.0 libdrm beignet opencv gstreamer1.0 gstreamer1.0-plugins-base"
@@ -19,7 +19,7 @@ EXTRA_OECONF = "--enable-gst --enable-drm --enable-libcl --enable-smartlib --ena
 
 CFLAGS += "-fPIE -fPIC"
 CFLAGS += "-O2 -D_FORTIFY_SOURCE=2"
-CFLAGS += "-Wformat -Wformat-security"
+CFLAGS += "-Wall -Wno-unused-parameter"
 CFLAGS += "-fstack-protector"
 
 LDFLAGS += "-z noexecstack"

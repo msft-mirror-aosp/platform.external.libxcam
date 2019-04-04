@@ -32,7 +32,7 @@
 #include "isp/isp_image_processor.h"
 #include "isp/isp_poll_thread.h"
 #include "isp/x3a_analyzer_aiq.h"
-#include "x3a_analyze_tuner.h"
+#include "isp/iq/x3a_analyze_tuner.h"
 #include "dynamic_analyzer_loader.h"
 #include "isp/hybrid_analyzer_loader.h"
 #endif
@@ -328,8 +328,6 @@ int main (int argc, char *argv[])
     bool have_cl_processor = false;
     SmartPtr<SmartAnalyzer> smart_analyzer;
     bool have_cl_post_processor = true;
-    SmartPtr<CL3aImageProcessor> cl_processor;
-    SmartPtr<CLPostImageProcessor> cl_post_processor;
     uint32_t tnr_type = CL_TNR_DISABLE;
     uint32_t denoise_type = 0;
     uint8_t tnr_level = 0;
@@ -817,7 +815,7 @@ int main (int argc, char *argv[])
 #endif
 #if HAVE_LIBCL
     if (have_cl_processor) {
-        cl_processor = new CL3aImageProcessor ();
+        SmartPtr<CL3aImageProcessor> cl_processor = new CL3aImageProcessor ();
         cl_processor->set_stats_callback(device_manager);
         cl_processor->set_denoise (denoise_type);
         cl_processor->set_capture_stage (capture_stage);
@@ -837,7 +835,7 @@ int main (int argc, char *argv[])
     }
 
     if (have_cl_post_processor) {
-        cl_post_processor = new CLPostImageProcessor ();
+        SmartPtr<CLPostImageProcessor> cl_post_processor = new CLPostImageProcessor ();
 
         cl_post_processor->set_stats_callback (device_manager);
         cl_post_processor->set_defog_mode ((CLPostImageProcessor::CLDefogMode)defog_type);
