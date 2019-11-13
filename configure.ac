@@ -2,8 +2,8 @@
 # Process this file with autoconf to produce a configure script.
 
 m4_define([xcam_major_version], [1])
-m4_define([xcam_minor_version], [1])
-m4_define([xcam_micro_version], [0])
+m4_define([xcam_minor_version], [2])
+m4_define([xcam_micro_version], [2])
 m4_define([xcam_version], [xcam_major_version.xcam_minor_version.xcam_micro_version])
 
 AC_PREREQ([2.60])
@@ -26,6 +26,13 @@ XCAM_LT_VERSION="xcam_major_version:xcam_minor_version:xcam_micro_version"
 XCAM_LT_LDFLAGS="-version-number $XCAM_LT_VERSION"
 AC_SUBST(XCAM_LT_VERSION)
 AC_SUBST(XCAM_LT_LDFLAGS)
+
+#xcam required OpenCV version
+XCAM_REQUIRE_CV_MIN=3.0.0
+XCAM_REQUIRE_CV_MAX=3.4.3
+
+#xcam required OpenSceneGraph version
+XCAM_REQUIRE_OSG_MIN=3.3.2
 
 # Checks for programs.
 AC_PROG_CC
@@ -65,6 +72,16 @@ AC_ARG_ENABLE(libcl,
                    [enable libcl image processor, @<:@default=yes@:>@]),
     [], [enable_libcl="yes"])
 
+AC_ARG_ENABLE([gles],
+    AS_HELP_STRING([--enable-gles],
+                   [enable gles, @<:@default=no@:>@]),
+    [], [enable_gles="no"])
+
+AC_ARG_ENABLE([vulkan],
+    AS_HELP_STRING([--enable-vulkan],
+                   [enable vulkan, @<:@default=no@:>@]),
+    [], [enable_vulkan="no"])
+
 AC_ARG_ENABLE(opencv,
     AS_HELP_STRING([--enable-opencv],
                    [enable opencv library, @<:@default=no@:>@]),
@@ -72,8 +89,18 @@ AC_ARG_ENABLE(opencv,
 
 AC_ARG_ENABLE(capi,
     AS_HELP_STRING([--enable-capi],
-                   [enable libxcam-capi library, @<:@default=yes@:>@]),
-    [], [enable_capi="yes"])
+                   [enable libxcam-capi library, @<:@default=no@:>@]),
+    [], [enable_capi="no"])
+
+AC_ARG_ENABLE([render],
+    AS_HELP_STRING([--enable-render],
+                   [enable texture render with OpenSceneGraph library, @<:@default=no@:>@]),
+    [], [enable_render="no"])
+
+AC_ARG_ENABLE([dnn],
+    AS_HELP_STRING([--enable-dnn],
+                   [enable dnn with OpenVino library, @<:@default=no@:>@]),
+    [], [enable_dnn="no"])
 
 # documentation
 AC_ARG_ENABLE(docs,
@@ -118,6 +145,51 @@ if test "$enable_libcl" = "yes"; then
     PKG_CHECK_MODULES(LIBCL, [libcl], [HAVE_LIBCL=1], [HAVE_LIBCL=0])
 fi
 
+# check gl
+HAVE_GLES=0
+if test "$enable_gles" = "yes"; then
+    PKG_CHECK_MODULES(LIBGL, [gl], [HAVE_GLES=1], [HAVE_GLES=0])
+fi
+
+# check vulkan
+HAVE_VULKAN=0
+if test "$enable_vulkan" = "yes"; then
+    PKG_CHECK_MODULES(LIBVULKAN, [vulkan], [HAVE_VULKAN=1], [HAVE_VULKAN=0])
+fi
+
+# check open sence graph
+ENABLE_RENDER=0
+if test "$enable_render" = "yes"; then
+    PKG_CHECK_MODULES(
+        [LIBOSG],
+        [openscenegraph-osg >= $XCAM_REQUIRE_OSG_MIN],
+        [HAVE_OSG=1],
+        [HAVE_OSG=0])
+
+    XCAM_OSG_VERSION=`$PKG_CONFIG --modversion openscenegraph-osg`
+    AC_MSG_NOTICE(OpenSceneGraph version: $XCAM_OSG_VERSION)
+
+    if test "$HAVE_OSG" -eq 1; then
+        ENABLE_RENDER=1
+    else
+        AC_MSG_WARN(OpenSceneGraph required version: >= $XCAM_REQUIRE_OSG_MIN)
+        ENABLE_RENDER=0
+    fi
+fi
+
+ENABLE_DNN=0
+if test "$enable_dnn" = "yes"; then
+    if test -z $OPENVINO_IE_INC_PATH; then
+        AC_MSG_WARN(Please export OPENVINO_IE_INC_PATH environment variables)
+        AC_MSG_ERROR(OpenVino inc path has not been set ... disable DNN module!)
+    fi
+    if test -z $OPENVINO_IE_LIBS_PATH; then
+        AC_MSG_WARN(Please export OPENVINO_IE_LIBS_PATH environment variables)
+        AC_MSG_ERROR(OpenVino library path has not been set ... disable DNN module!)
+    fi
+    ENABLE_DNN=1
+fi
+
 if test "$enable_libcl" = "yes" && test "$HAVE_LIBCL" -eq 0; then
     PKG_CHECK_MODULES(LIBCL, [OpenCL], [HAVE_LIBCL=1], [HAVE_LIBCL=0])
 fi
@@ -143,12 +215,21 @@ if test "$HAVE_LIBCL" -eq 1; then
     fi
 fi
 
-# check opencv minimum version number
+# check opencv version number
 HAVE_OPENCV=0
 if test "$enable_opencv" = "yes"; then
-    OPENCV_VERSION_STR=`$PKG_CONFIG --modversion opencv`
-        PKG_CHECK_MODULES([OPENCV], [opencv >= 3.0.0], [HAVE_OPENCV=1], [HAVE_OPENCV=0])
-        echo "OpenCV version:"$OPENCV_VERSION_STR "minimum required version:3.0.0" "have opencv:"$HAVE_OPENCV
+    PKG_CHECK_MODULES(
+        [OPENCV],
+        [opencv >= $XCAM_REQUIRE_CV_MIN opencv <= $XCAM_REQUIRE_CV_MAX],
+        [HAVE_OPENCV=1],
+        [HAVE_OPENCV=0])
+
+    XCAM_CV_VERSION=`$PKG_CONFIG --modversion opencv`
+    AC_MSG_NOTICE(OpenCV version: $XCAM_CV_VERSION)
+
+    if test "$HAVE_OPENCV" -eq 0; then
+        AC_MSG_ERROR(OpenCV required version: >= $XCAM_REQUIRE_CV_MIN && <= $XCAM_REQUIRE_CV_MAX)
+    fi
 fi
 
 # check opencv videostab module
@@ -193,7 +274,8 @@ fi
 
 # check capi build
 ENABLE_CAPI=0
-if test "$enable_capi" = "yes"; then
+if test "$enable_capi" = "yes" && test "$HAVE_LIBCL" -eq 1; then
+    AC_MSG_NOTICE(enable capi && have libcl: $HAVE_LIBCL)
     ENABLE_CAPI=1
 fi
 
@@ -305,16 +387,13 @@ fi
 AM_CONDITIONAL([ENABLE_GST], [test "$ENABLE_GST" -eq 1])
 
 dnl set XCAM_CFLAGS and XCAM_CXXFLAGS
-XCAM_CFLAGS=" -fPIC -DSTDC99 -W -Wall -D_REENTRANT -Wformat -Wformat-security -fstack-protector"
+XCAM_CFLAGS=" -fPIC -Wall -fstack-protector"
 if test "$enable_debug" = "yes"; then
     XCAM_CFLAGS="$XCAM_CFLAGS -g -DDEBUG"
 fi
 XCAM_CXXFLAGS="$XCAM_CFLAGS -std=c++0x"
 AC_SUBST(XCAM_CFLAGS)
 AC_SUBST(XCAM_CXXFLAGS)
-
-PTHREAD_LDFLAGS="$PTHREAD_LDFLAGS -pthread"
-AC_SUBST(PTHREAD_LDFLAGS)
 
 # define macor in config.h
 AC_DEFINE_UNQUOTED([ENABLE_PROFILING], $ENABLE_PROFILING,
@@ -327,6 +406,22 @@ AM_CONDITIONAL([HAVE_LIBDRM], [test "$HAVE_LIBDRM" -eq 1])
 AC_DEFINE_UNQUOTED([HAVE_LIBCL], $HAVE_LIBCL,
     [have libcl])
 AM_CONDITIONAL([HAVE_LIBCL], [test "$HAVE_LIBCL" -eq 1])
+
+AC_DEFINE_UNQUOTED([HAVE_GLES], $HAVE_GLES,
+    [have gles])
+AM_CONDITIONAL([HAVE_GLES], [test "$HAVE_GLES" -eq 1])
+
+AC_DEFINE_UNQUOTED([HAVE_VULKAN], $HAVE_VULKAN,
+    [have vulkan])
+AM_CONDITIONAL([HAVE_VULKAN], [test "$HAVE_VULKAN" -eq 1])
+
+AC_DEFINE_UNQUOTED([ENABLE_RENDER], $ENABLE_RENDER,
+    [enable texture render])
+AM_CONDITIONAL([ENABLE_RENDER], [test "$ENABLE_RENDER" -eq 1])
+
+AC_DEFINE_UNQUOTED([ENABLE_DNN], $ENABLE_DNN,
+    [enable dnn])
+AM_CONDITIONAL([ENABLE_DNN], [test "$ENABLE_DNN" -eq 1])
 
 AC_DEFINE_UNQUOTED([HAVE_OPENCV], $HAVE_OPENCV,
     [have opencv])
@@ -354,12 +449,19 @@ AM_CONDITIONAL([ENABLE_IA_AIQ], [test "$ENABLE_IA_AIQ" -eq 1])
 AM_CONDITIONAL([USE_LOCAL_AIQ], [test "$USE_LOCAL_AIQ" -eq 1])
 
 AC_CONFIG_FILES([Makefile
-                 clx_kernel/Makefile
+                 shaders/Makefile
+                 shaders/clx/Makefile
+                 shaders/glslx/Makefile
                  xcore/Makefile
                  modules/Makefile
+                 modules/ocv/Makefile
                  modules/soft/Makefile
                  modules/isp/Makefile
                  modules/ocl/Makefile
+                 modules/gles/Makefile
+                 modules/vulkan/Makefile
+                 modules/render/Makefile
+                 modules/dnn/Makefile
                  wrapper/Makefile
                  wrapper/gstreamer/Makefile
                  wrapper/gstreamer/interface/Makefile
@@ -383,8 +485,13 @@ if test "$HAVE_LIBDRM" -eq 1; then have_drm="yes"; else have_drm="no"; fi
 if test "$USE_LOCAL_AIQ" -eq 1; then use_local_aiq="yes"; else  use_local_aiq="no"; fi
 if test "$USE_LOCAL_ATOMISP" -eq 1; then use_local_atomisp="yes"; else  use_local_atomisp="no"; fi
 if test "$HAVE_LIBCL" -eq 1; then have_libcl="yes"; else  have_libcl="no"; fi
+if test "$HAVE_GLES" -eq 1; then have_gles="yes"; else  have_gles="no"; fi
+if test "$HAVE_VULKAN" -eq 1; then have_vulkan="yes"; else  have_vulkan="no"; fi
 if test "$HAVE_OPENCV" -eq 1; then have_opencv="yes"; else have_opencv="no"; fi
+if test "$ENABLE_RENDER" -eq 1; then enable_render="yes"; else enable_render="no"; fi
+if test "$ENABLE_DNN" -eq 1; then enable_dnn="yes"; else enable_dnn="no"; fi
 if test "$ENABLE_DVS" -eq 1; then enable_dvs="yes"; else enable_dvs="no"; fi
+if test "$ENABLE_CAPI" -eq 1; then enable_capi="yes"; else enable_capi="no"; fi
 
 echo "
      libxcam configuration summary
@@ -396,8 +503,12 @@ echo "
      build aiq analyzer         : $enable_aiq
      use local aiq              : $use_local_aiq
      use local atomisp          : $use_local_atomisp
-     have opencl lib            : $have_libcl
-     have opencv lib            : $have_opencv
+     enable OpenCV              : $have_opencv
+     enable OpenCL              : $have_libcl
+     enable GLES                : $have_gles
+     enable Vulkan              : $have_vulkan
+     enable OSG render          : $enable_render
+     enable DNN                 : $enable_dnn
      enable 3a lib              : $enable_3alib
      enable smart analysis lib  : $enable_smartlib
      enable dvs                 : $enable_dvs

@@ -33,7 +33,7 @@
 #if HAVE_OPENCV
 #include <opencv2/opencv.hpp>
 #include <opencv2/core/ocl.hpp>
-#include <ocl/cv_base_class.h>
+#include "ocv/cv_utils.h"
 #endif
 
 using namespace XCam;
@@ -62,10 +62,7 @@ int main (int argc, char *argv[])
     XCamReturn ret = XCAM_RETURN_NO_ERROR;
 
     SmartPtr<CLVideoStabilizer> video_stab;
-
     SmartPtr<CLContext> context;
-    SmartPtr<BufferPool> buf_pool;
-
     VideoBufferInfo input_buf_info;
     VideoBufferInfo output_buf_info;
     SmartPtr<VideoBuffer> input_buf;
@@ -84,7 +81,6 @@ int main (int argc, char *argv[])
     const char *gyro_data = "gyro_data.csv";
 
     bool need_save_output = true;
-    double framerate = 30.0;
     int loop = 1;
 
     const struct option long_opts[] = {
@@ -127,7 +123,7 @@ int main (int argc, char *argv[])
             break;
         case 'H':
             usage (argv[0]);
-            return -1;
+            return 0;
         default:
             printf ("getopt_long return unknown value:%c\n", opt);
             usage (argv[0]);
@@ -201,7 +197,7 @@ int main (int argc, char *argv[])
 
     input_buf_info.init (input_format, input_width, input_height);
     output_buf_info.init (input_format, output_width, output_height);
-    buf_pool = new CLVideoBufferPool ();
+    SmartPtr<BufferPool> buf_pool = new CLVideoBufferPool ();
     XCAM_ASSERT (buf_pool.ptr ());
     buf_pool->set_video_info (input_buf_info);
     if (!buf_pool->reserve (36)) {
@@ -216,7 +212,7 @@ int main (int argc, char *argv[])
     cv::VideoWriter writer;
     if (need_save_output) {
         cv::Size dst_size = cv::Size (output_width, output_height);
-        if (!writer.open (file_out_name, CV_FOURCC('X', '2', '6', '4'), framerate, dst_size)) {
+        if (!writer.open (file_out_name, cv::VideoWriter::fourcc ('X', '2', '6', '4'), 30, dst_size)) {
             XCAM_LOG_ERROR ("open file %s failed", file_out_name);
             return -1;
         }

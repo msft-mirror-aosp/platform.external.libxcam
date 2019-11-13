@@ -1,13 +1,29 @@
+if HAVE_OPENCV
+OCV_DIR = ocv
+endif
+
 if HAVE_LIBCL
 OCL_DIR = ocl
-else
-OCL_DIR =
+endif
+
+if HAVE_GLES
+GLES_DIR = gles
+endif
+
+if HAVE_VULKAN
+VULKAN_DIR = vulkan
+endif
+
+if ENABLE_RENDER
+RENDER_DIR = render
 endif
 
 if ENABLE_IA_AIQ
 ISP_DIR = isp
-else
-ISP_DIR =
 endif
 
-SUBDIRS = soft $(ISP_DIR) $(OCL_DIR)
+if ENABLE_DNN
+DNN_DIR = dnn
+endif
+
+SUBDIRS = $(OCV_DIR) soft $(OCL_DIR) $(GLES_DIR) $(VULKAN_DIR) $(RENDER_DIR) $(ISP_DIR) $(DNN_DIR)

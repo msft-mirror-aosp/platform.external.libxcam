@@ -59,8 +59,9 @@ ContextBase::ContextBase (HandleType type)
     , _alloc_out_buf (false)
 {
     if (!_inbuf_pool.ptr()) {
-        _inbuf_pool = new CLVideoBufferPool ();
-        XCAM_ASSERT (_inbuf_pool.ptr ());
+        SmartPtr<BufferPool> pool = new CLVideoBufferPool ();
+        XCAM_ASSERT (pool.ptr ());
+        _inbuf_pool = pool;
     }
 }
 
@@ -221,10 +222,6 @@ StitchContext::create_handler (SmartPtr<CLContext> &context)
     XCAM_FAIL_RETURN (ERROR, image_360.ptr (), NULL, "create image stitch handler failed");
     image_360->set_output_size (sttch_width, sttch_height);
     XCAM_LOG_INFO ("stitch output size width:%d height:%d", sttch_width, sttch_height);
-
-#if HAVE_OPENCV
-    image_360->set_feature_match_ocl (_fm_ocl);
-#endif
 
     return image_360;
 }

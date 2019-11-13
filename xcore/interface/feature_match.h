@@ -28,7 +28,7 @@
 
 namespace XCam {
 
-struct CVFMConfig {
+struct FMConfig {
     int sitch_min_width;
     int min_corners;           // number of minimum efficient corners
     float offset_factor;       // last_offset * offset_factor + cur_offset * (1.0f - offset_factor)
@@ -38,7 +38,7 @@ struct CVFMConfig {
     float max_valid_offset_y;  // valid maximum offset in vertical direction
     float max_track_error;     // maximum track error
 
-    CVFMConfig ()
+    FMConfig ()
         : sitch_min_width (56)
         , min_corners (8)
         , offset_factor (0.8f)
@@ -56,41 +56,46 @@ public:
     explicit FeatureMatch ();
     virtual ~FeatureMatch () {};
 
-    void set_config (CVFMConfig config);
-    CVFMConfig get_config ();
+    static SmartPtr<FeatureMatch> create_default_feature_match ();
+    static SmartPtr<FeatureMatch> create_cluster_feature_match ();
+    static SmartPtr<FeatureMatch> create_capi_feature_match ();
+
+    virtual void feature_match (
+        const SmartPtr<VideoBuffer> &left_buf, const SmartPtr<VideoBuffer> &right_buf) = 0;
 
     void set_fm_index (int idx);
+    void set_config (const FMConfig &config);
+
+    void set_crop_rect (const Rect &left_rect, const Rect &right_rect);
+    void get_crop_rect (Rect &left_rect, Rect &right_rect);
 
     void reset_offsets ();
+    float get_current_left_offset_x ();
+    float get_current_left_offset_y ();
 
-    virtual void optical_flow_feature_match (
-        const SmartPtr<VideoBuffer> &left_buf, const SmartPtr<VideoBuffer> &right_buf,
-        Rect &left_crop_rect, Rect &right_crop_rect, int dst_width) = 0;
-
-    float get_current_left_offset_x () const {
-        return _x_offset;
-    }
-
-    virtual void set_ocl (bool use_ocl) = 0;
-    virtual bool is_ocl_path () = 0;
+    virtual void set_dst_width (int width);
+    virtual void enable_adjust_crop_area ();
 
 protected:
-    bool get_mean_offset (std::vector<float> &offsets, float sum, int &count, float &mean_offset);
-
-    void adjust_stitch_area (int dst_width, float &x_offset, Rect &stitch0, Rect &stitch1);
+    bool get_mean_offset (const std::vector<float> &offsets, float sum, int &count, float &mean_offset);
 
 private:
     XCAM_DEAD_COPY (FeatureMatch);
 
 protected:
     float                _x_offset;
+    float                _y_offset;
     float                _mean_offset;
+    float                _mean_offset_y;
     int                  _valid_count;
-    CVFMConfig           _config;
+    FMConfig             _config;
+
+    Rect                 _left_rect;
+    Rect                 _right_rect;
 
     // debug parameters
     int                  _fm_idx;
-    uint                 _frame_num;
+    uint32_t             _frame_num;
 };
 
 }

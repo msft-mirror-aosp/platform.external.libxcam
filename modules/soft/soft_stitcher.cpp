@@ -31,7 +31,7 @@
 #define ENABLE_FEATURE_MATCH HAVE_OPENCV
 
 #if ENABLE_FEATURE_MATCH
-#include "cv_capi_feature_match.h"
+#include "ocv/cv_capi_feature_match.h"
 #ifndef ANDROID
 #include <opencv2/core/ocl.hpp>
 #endif
@@ -181,17 +181,23 @@ public:
     XCamReturn stop ();
 
     XCamReturn fisheye_dewarp_to_table ();
-    XCamReturn feature_match (
-        const SmartPtr<VideoBuffer> &left_buf,
-        const SmartPtr<VideoBuffer> &right_buf,
-        const uint32_t idx);
+    XCamReturn start_feature_match (
+        const SmartPtr<VideoBuffer> &left_buf, const SmartPtr<VideoBuffer> &right_buf, const uint32_t idx);
 
     bool get_and_reset_feature_match_factors (uint32_t idx, Factor &left, Factor &right);
 
 private:
+    SmartPtr<SoftGeoMapper> create_geo_mapper (const Stitcher::RoundViewSlice &view_slice);
+
     XCamReturn init_fisheye (uint32_t idx);
     bool init_dewarp_factors (uint32_t idx);
     XCamReturn create_copier (Stitcher::CopyArea area);
+
+    void calc_factors (
+        const uint32_t &idx, const Factor &last_left_factor, const Factor &last_right_factor,
+        Factor &cur_left, Factor &cur_right);
+
+    void init_feature_match (uint32_t idx);
 
 private:
     FisheyeDewarp           _fisheye [XCAM_STITCH_MAX_CAMERAS];
@@ -205,6 +211,21 @@ private:
     SoftStitcher           *_stitcher;
 };
 
+
+void
+StitcherImpl::calc_factors (
+    const uint32_t &idx, const Factor &last_left_factor, const Factor &last_right_factor,
+    Factor &cur_left, Factor &cur_right)
+{
+    Factor match_left_factor, match_right_factor;
+    get_and_reset_feature_match_factors (idx, match_left_factor, match_right_factor);
+
+    cur_left.x = last_left_factor.x * match_left_factor.x;
+    cur_left.y = last_left_factor.y * match_left_factor.y;
+    cur_right.x = last_right_factor.x * match_right_factor.x;
+    cur_right.y = last_right_factor.y * match_right_factor.y;
+}
+
 bool
 StitcherImpl::init_dewarp_factors (uint32_t idx)
 {
@@ -212,26 +233,38 @@ StitcherImpl::init_dewarp_factors (uint32_t idx)
         ERROR, _fisheye[idx].dewarp.ptr (), false,
         "FisheyeDewarp dewarp handler empty");
 
-    Factor match_left_factor, match_right_factor;
-    get_and_reset_feature_match_factors (idx, match_left_factor, match_right_factor);
+    Factor last_left_factor, last_right_factor, cur_left, cur_right;
+    if (_stitcher->get_scale_mode () == ScaleSingleConst) {
+        Factor unify_factor;
+        _fisheye[idx].dewarp->get_factors (unify_factor.x, unify_factor.y);
+        if (XCAM_DOUBLE_EQUAL_AROUND (unify_factor.x, 0.0f) ||
+                XCAM_DOUBLE_EQUAL_AROUND (unify_factor.y, 0.0f)) { // not started.
+            return true;
+        }
+        last_left_factor = last_right_factor = unify_factor;
 
-    Factor unify_factor, last_left_factor, last_right_factor;
-    _fisheye[idx].dewarp->get_factors (unify_factor.x, unify_factor.y);
-    last_left_factor = last_right_factor = unify_factor;
-    if (XCAM_DOUBLE_EQUAL_AROUND (unify_factor.x, 0.0f) ||
-            XCAM_DOUBLE_EQUAL_AROUND (unify_factor.y, 0.0f)) { // not started.
-        return true;
+        calc_factors (idx, last_left_factor, last_right_factor, cur_left, cur_right);
+        unify_factor.x = (cur_left.x + cur_right.x) / 2.0f;
+        unify_factor.y = (cur_left.y + cur_right.y) / 2.0f;
+
+        _fisheye[idx].dewarp->set_factors (unify_factor.x, unify_factor.y);
+    } else {
+        SmartPtr<SoftDualConstGeoMapper> dewarp = _fisheye[idx].dewarp.dynamic_cast_ptr<SoftDualConstGeoMapper> ();
+        XCAM_ASSERT (dewarp.ptr ());
+        dewarp->get_left_factors (last_left_factor.x, last_left_factor.y);
+        dewarp->get_right_factors (last_right_factor.x, last_right_factor.y);
+        if (XCAM_DOUBLE_EQUAL_AROUND (last_left_factor.x, 0.0f) ||
+                XCAM_DOUBLE_EQUAL_AROUND (last_left_factor.y, 0.0f) ||
+                XCAM_DOUBLE_EQUAL_AROUND (last_right_factor.y, 0.0f) ||
+                XCAM_DOUBLE_EQUAL_AROUND (last_right_factor.y, 0.0f)) { // not started.
+            return true;
+        }
+
+        calc_factors (idx, last_left_factor, last_right_factor, cur_left, cur_right);
+
+        dewarp->set_left_factors (cur_left.x, cur_left.y);
+        dewarp->set_right_factors (cur_right.x, cur_right.y);
     }
-
-    Factor cur_left, cur_right;
-    cur_left.x = last_left_factor.x * match_left_factor.x;
-    cur_left.y = last_left_factor.y * match_left_factor.y;
-    cur_right.x = last_right_factor.x * match_right_factor.x;
-    cur_right.y = last_right_factor.y * match_right_factor.y;
-
-    unify_factor.x = (cur_left.x + cur_right.x) / 2.0f;
-    unify_factor.y = (cur_left.y + cur_right.y) / 2.0f;
-    _fisheye[idx].dewarp->set_factors (unify_factor.x, unify_factor.y);
 
     return true;
 }
@@ -280,17 +313,39 @@ StitcherImpl::get_and_reset_feature_match_factors (uint32_t idx, Factor &left, F
     return true;
 }
 
+SmartPtr<SoftGeoMapper>
+StitcherImpl::create_geo_mapper (const Stitcher::RoundViewSlice &view_slice)
+{
+    SmartPtr<SoftGeoMapper> dewarp;
+    if (_stitcher->get_scale_mode () == ScaleSingleConst)
+        dewarp = new SoftGeoMapper ("sitcher_remapper");
+    else if (_stitcher->get_scale_mode () == ScaleDualConst)
+        dewarp = new SoftDualConstGeoMapper ("sitcher_dualconst_remapper");
+    else {
+        SmartPtr<SoftDualCurveGeoMapper> geomap = new SoftDualCurveGeoMapper ("sitcher_dualcurve_remapper");
+        XCAM_ASSERT (geomap.ptr ());
+
+        BowlDataConfig bowl = _stitcher->get_bowl_config ();
+        float scaled_height = (bowl.wall_height + bowl.ground_length / 2.0f) /
+                              (bowl.wall_height + bowl.ground_length) * view_slice.height;
+
+        geomap->set_scaled_height (scaled_height);
+        dewarp = geomap;
+    }
+
+    XCAM_ASSERT (dewarp.ptr ());
+    return dewarp;
+}
+
 XCamReturn
 StitcherImpl::init_fisheye (uint32_t idx)
 {
     FisheyeDewarp &fisheye = _fisheye[idx];
-    SmartPtr<ImageHandler::Callback> dewarp_cb = new CbGeoMap (_stitcher);
-    fisheye.dewarp = new SoftGeoMapper ("sitcher_remapper");
-    XCAM_ASSERT (fisheye.dewarp.ptr ());
-    fisheye.dewarp->set_callback (dewarp_cb);
+    Stitcher::RoundViewSlice view_slice = _stitcher->get_round_view_slice (idx);
 
-    Stitcher::RoundViewSlice view_slice =
-        _stitcher->get_round_view_slice (idx);
+    SmartPtr<ImageHandler::Callback> dewarp_cb = new CbGeoMap (_stitcher);
+    fisheye.dewarp = create_geo_mapper (view_slice);;
+    fisheye.dewarp->set_callback (dewarp_cb);
 
     VideoBufferInfo buf_info;
     buf_info.init (
@@ -298,8 +353,9 @@ StitcherImpl::init_fisheye (uint32_t idx)
         XCAM_ALIGN_UP (view_slice.width, SOFT_STITCHER_ALIGNMENT_X),
         XCAM_ALIGN_UP (view_slice.height, SOFT_STITCHER_ALIGNMENT_Y));
 
-    fisheye.buf_pool = new SoftVideoBufAllocator (buf_info);
-    XCAM_ASSERT (fisheye.buf_pool.ptr ());
+    SmartPtr<BufferPool> pool = new SoftVideoBufAllocator (buf_info);
+    XCAM_ASSERT (pool.ptr ());
+    fisheye.buf_pool = pool;
     XCAM_FAIL_RETURN (
         ERROR, fisheye.buf_pool->reserve (2), XCAM_RETURN_ERROR_MEM,
         "stitcher:%s reserve dewarp buffer pool(w:%d,h:%d) failed",
@@ -329,6 +385,61 @@ StitcherImpl::create_copier (Stitcher::CopyArea area)
     return XCAM_RETURN_NO_ERROR;
 }
 
+void
+StitcherImpl::init_feature_match (uint32_t idx)
+{
+#if ENABLE_FEATURE_MATCH
+
+#ifndef ANDROID
+    FeatureMatchMode fm_mode = _stitcher->get_fm_mode ();
+    if (fm_mode == FMNone)
+        return ;
+    else if (fm_mode == FMDefault)
+        _overlaps[idx].matcher = FeatureMatch::create_default_feature_match ();
+    else if (fm_mode == FMCluster)
+        _overlaps[idx].matcher = FeatureMatch::create_cluster_feature_match ();
+    else if (fm_mode == FMCapi)
+        _overlaps[idx].matcher = FeatureMatch::create_capi_feature_match ();
+    else {
+        XCAM_LOG_ERROR ("unsupported FeatureMatchMode: %d", fm_mode);
+        XCAM_ASSERT (false);
+    }
+#else
+    _overlaps[idx].matcher = new CVCapiFeatureMatch;
+#endif
+    XCAM_ASSERT (_overlaps[idx].matcher.ptr ());
+
+    FMConfig config;
+    config.sitch_min_width = 136;
+    config.min_corners = 4;
+    config.offset_factor = 0.8f;
+    config.delta_mean_offset = 120.0f;
+    config.recur_offset_error = 8.0f;
+    config.max_adjusted_offset = 24.0f;
+    config.max_valid_offset_y = 20.0f;
+    config.max_track_error = 28.0f;
+#ifdef ANDROID
+    config.max_track_error = 3600.0f;
+#endif
+    _overlaps[idx].matcher->set_config (config);
+    _overlaps[idx].matcher->set_fm_index (idx);
+
+    const BowlDataConfig bowl = _stitcher->get_bowl_config ();
+    const Stitcher::ImageOverlapInfo &info = _stitcher->get_overlap (idx);
+    Rect left_ovlap = info.left;
+    Rect right_ovlap = info.right;
+
+    left_ovlap.pos_y = 0;
+    left_ovlap.height = int32_t (bowl.wall_height / (bowl.wall_height + bowl.ground_length) * left_ovlap.height);
+    right_ovlap.pos_y = 0;
+    right_ovlap.height = left_ovlap.height;
+    _overlaps[idx].matcher->set_crop_rect (left_ovlap, right_ovlap);
+#else
+    XCAM_LOG_ERROR ("FeatureMatch unsupported");
+    XCAM_ASSERT (false);
+#endif
+}
+
 XCamReturn
 StitcherImpl::init_config (uint32_t count)
 {
@@ -342,23 +453,7 @@ StitcherImpl::init_config (uint32_t count)
             "stitcher:%s init fisheye failed, idx:%d.", XCAM_STR (_stitcher->get_name ()), i);
 
 #if ENABLE_FEATURE_MATCH
-        _overlaps[i].matcher = new CVCapiFeatureMatch;
-
-        CVFMConfig config;
-        config.sitch_min_width = 136;
-        config.min_corners = 4;
-        config.offset_factor = 0.8f;
-        config.delta_mean_offset = 120.0f;
-        config.recur_offset_error = 8.0f;
-        config.max_adjusted_offset = 24.0f;
-        config.max_valid_offset_y = 20.0f;
-#ifndef ANDROID
-        config.max_track_error = 28.0f;
-#else
-        config.max_track_error = 3600.0f;
-#endif
-        _overlaps[i].matcher->set_config (config);
-        _overlaps[i].matcher->set_fm_index (i);
+        init_feature_match (i);
 #endif
 
         _overlaps[i].blender = create_soft_blender ().dynamic_cast_ptr<SoftBlender>();
@@ -436,7 +531,7 @@ StitcherImpl::fisheye_dewarp_to_table ()
         _fisheye[i].dewarp->set_output_size (view_slice.width, view_slice.height);
         if (bowl.angle_end < bowl.angle_start)
             bowl.angle_start -= 360.0f;
-        XCAM_LOG_INFO (
+        XCAM_LOG_DEBUG (
             "soft-stitcher:%s camera(idx:%d) info (angle start:%.2f, range:%.2f), bowl info (angle start%.2f, end:%.2f)",
             XCAM_STR (_stitcher->get_name ()), i,
             view_slice.hori_angle_start, view_slice.hori_angle_range,
@@ -493,55 +588,6 @@ Overlap::find_blender_param_in_map (
 }
 
 XCamReturn
-StitcherImpl::feature_match (
-    const SmartPtr<VideoBuffer> &left_buf,
-    const SmartPtr<VideoBuffer> &right_buf,
-    const uint32_t idx)
-{
-    const Stitcher::ImageOverlapInfo overlap_info = _stitcher->get_overlap (idx);
-    Rect left_ovlap = overlap_info.left;
-    Rect right_ovlap = overlap_info.right;
-    const VideoBufferInfo left_buf_info = left_buf->get_video_info ();
-
-    left_ovlap.pos_y = left_ovlap.height / 5;
-    left_ovlap.height = left_ovlap.height / 2;
-    right_ovlap.pos_y = right_ovlap.height / 5;
-    right_ovlap.height = right_ovlap.height / 2;
-
-    _overlaps[idx].matcher->reset_offsets ();
-    _overlaps[idx].matcher->optical_flow_feature_match (
-        left_buf, right_buf, left_ovlap, right_ovlap, left_buf_info.width);
-    float left_offsetx = _overlaps[idx].matcher->get_current_left_offset_x ();
-    Factor left_factor, right_factor;
-
-    uint32_t left_idx = idx;
-    float center_x = (float) _stitcher->get_center (left_idx).slice_center_x;
-    float feature_center_x = (float)left_ovlap.pos_x + (left_ovlap.width / 2.0f);
-    float range = feature_center_x - center_x;
-    XCAM_ASSERT (range > 1.0f);
-    right_factor.x = (range + left_offsetx / 2.0f) / range;
-    right_factor.y = 1.0;
-    XCAM_ASSERT (right_factor.x > 0.0f && right_factor.x < 2.0f);
-
-    uint32_t right_idx = (idx + 1) % _stitcher->get_camera_num ();
-    center_x = (float) _stitcher->get_center (right_idx).slice_center_x;
-    feature_center_x = (float)right_ovlap.pos_x + (right_ovlap.width / 2.0f);
-    range = center_x - feature_center_x;
-    XCAM_ASSERT (range > 1.0f);
-    left_factor.x = (range + left_offsetx / 2.0f) / range;
-    left_factor.y = 1.0;
-    XCAM_ASSERT (left_factor.x > 0.0f && left_factor.x < 2.0f);
-
-    {
-        SmartLock locker (_map_mutex);
-        _fisheye[left_idx].right_match_factor = right_factor;
-        _fisheye[right_idx].left_match_factor = left_factor;
-    }
-
-    return XCAM_RETURN_NO_ERROR;
-}
-
-XCamReturn
 StitcherImpl::start_single_blender (
     const uint32_t idx,
     const SmartPtr<BlenderParam> &param)
@@ -558,6 +604,53 @@ StitcherImpl::start_single_blender (
     blender->set_input_merge_area (overlap_info.left, 0);
     blender->set_input_merge_area (overlap_info.right, 1);
     return blender->execute_buffer (param, false);
+}
+
+XCamReturn
+StitcherImpl::start_feature_match (
+    const SmartPtr<VideoBuffer> &left_buf,
+    const SmartPtr<VideoBuffer> &right_buf,
+    const uint32_t idx)
+{
+#if ENABLE_FEATURE_MATCH
+    _overlaps[idx].matcher->reset_offsets ();
+    _overlaps[idx].matcher->feature_match (left_buf, right_buf);
+
+    Rect left_ovlap, right_ovlap;
+    _overlaps[idx].matcher->get_crop_rect (left_ovlap, right_ovlap);
+
+    float left_offsetx = _overlaps[idx].matcher->get_current_left_offset_x ();
+    Factor left_factor, right_factor;
+
+    uint32_t left_idx = idx;
+    float center_x = (float) _stitcher->get_center (left_idx).slice_center_x;
+    float feature_center_x = (float)left_ovlap.pos_x + (left_ovlap.width / 2.0f);
+    float range = feature_center_x - center_x;
+    XCAM_ASSERT (range > 1.0f);
+    right_factor.x = (range + left_offsetx / 2.0f) / range;
+    right_factor.y = 1.0f;
+    XCAM_ASSERT (right_factor.x > 0.0f && right_factor.x < 2.0f);
+
+    uint32_t right_idx = (idx + 1) % _stitcher->get_camera_num ();
+    center_x = (float) _stitcher->get_center (right_idx).slice_center_x;
+    feature_center_x = (float)right_ovlap.pos_x + (right_ovlap.width / 2.0f);
+    range = center_x - feature_center_x;
+    XCAM_ASSERT (range > 1.0f);
+    left_factor.x = (range + left_offsetx / 2.0f) / range;
+    left_factor.y = 1.0f;
+    XCAM_ASSERT (left_factor.x > 0.0f && left_factor.x < 2.0f);
+
+    {
+        SmartLock locker (_map_mutex);
+        _fisheye[left_idx].right_match_factor = right_factor;
+        _fisheye[right_idx].left_match_factor = left_factor;
+    }
+
+    return XCAM_RETURN_NO_ERROR;
+#else
+    XCAM_LOG_ERROR ("FeatureMatch unsupported");
+    return XCAM_RETURN_ERROR_PARAM;
+#endif
 }
 
 XCamReturn
@@ -606,20 +699,23 @@ StitcherImpl::start_overlap_tasks (
 
 #if ENABLE_FEATURE_MATCH
     //start feature match
-    if (cur_param.ptr ()) {
-        ret = feature_match (cur_param->in_buf, cur_param->in1_buf, idx);
-        XCAM_FAIL_RETURN (
-            ERROR, xcam_ret_is_ok (ret), ret,
-            "soft-stitcher:%s feature-match overlap idx:%d failed", XCAM_STR (_stitcher->get_name ()), idx);
-    }
+    if (_stitcher->get_fm_mode ()) {
+        if (cur_param.ptr ()) {
+            ret = start_feature_match (cur_param->in_buf, cur_param->in1_buf, idx);
+            XCAM_FAIL_RETURN (
+                ERROR, xcam_ret_is_ok (ret), ret,
+                "soft-stitcher:%s feature-match overlap idx:%d failed", XCAM_STR (_stitcher->get_name ()), idx);
+        }
 
-    if (prev_param.ptr ()) {
-        ret = feature_match (prev_param->in_buf, prev_param->in1_buf, pre_idx);
-        XCAM_FAIL_RETURN (
-            ERROR, xcam_ret_is_ok (ret), ret,
-            "soft-stitcher:%s feature-match overlap idx:%d failed", XCAM_STR (_stitcher->get_name ()), pre_idx);
+        if (prev_param.ptr ()) {
+            ret = start_feature_match (prev_param->in_buf, prev_param->in1_buf, pre_idx);
+            XCAM_FAIL_RETURN (
+                ERROR, xcam_ret_is_ok (ret), ret,
+                "soft-stitcher:%s feature-match overlap idx:%d failed", XCAM_STR (_stitcher->get_name ()), pre_idx);
+        }
     }
 #endif
+
     return XCAM_RETURN_NO_ERROR;
 }
 
@@ -718,8 +814,10 @@ SoftStitcher::SoftStitcher (const char *name)
     : SoftHandler (name)
     , Stitcher (SOFT_STITCHER_ALIGNMENT_X, SOFT_STITCHER_ALIGNMENT_Y)
 {
-    _impl = new SoftSitcherPriv::StitcherImpl (this);
-    XCAM_ASSERT (_impl.ptr ());
+    SmartPtr<SoftSitcherPriv::StitcherImpl> impl = new SoftSitcherPriv::StitcherImpl (this);
+    XCAM_ASSERT (impl.ptr ());
+    _impl = impl;
+
 #if ENABLE_FEATURE_MATCH
 #ifndef ANDROID
     cv::ocl::setUseOpenCL (false);
@@ -801,7 +899,7 @@ SoftStitcher::dewarp_done (
     if (!check_work_continue (param, error))
         return;
 
-    XCAM_LOG_INFO ("soft-stitcher:%s camera(idx:%d) dewarp done", XCAM_STR (get_name ()), dewarp_param->idx);
+    XCAM_LOG_DEBUG ("soft-stitcher:%s camera(idx:%d) dewarp done", XCAM_STR (get_name ()), dewarp_param->idx);
     stitcher_dump_buf (dewarp_param->out_buf, dewarp_param->idx, "stitcher-dewarp");
 
     //start both blender and feature match
@@ -834,7 +932,7 @@ SoftStitcher::blender_done (
     }
 
     stitcher_dump_buf (blender_param->out_buf, blender_param->idx, "stitcher-blend");
-    XCAM_LOG_INFO ("blender:(%s) overlap:%d done", XCAM_STR (handler->get_name ()), blender_param->idx);
+    XCAM_LOG_DEBUG ("blender:(%s) overlap:%d done", XCAM_STR (handler->get_name ()), blender_param->idx);
 
     if (_impl->dec_task_count (param) == 0) {
         work_well_done (param, error);
@@ -859,7 +957,7 @@ SoftStitcher::copy_task_done (
         _impl->remove_task_count (param);
         return;
     }
-    XCAM_LOG_INFO ("soft-stitcher:%s camera(idx:%d) copy done", XCAM_STR (get_name ()), args->idx);
+    XCAM_LOG_DEBUG ("soft-stitcher:%s camera(idx:%d) copy done", XCAM_STR (get_name ()), args->idx);
 
     if (_impl->dec_task_count (param) == 0) {
         work_well_done (param, error);

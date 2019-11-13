@@ -32,11 +32,11 @@ transform_bowl_coord_to_image_x (
     const float bowl_x, const float bowl_y,
     const uint32_t img_width)
 {
-    float offset_radian = (bowl_x < 0.0f) ? PI : ((bowl_y >= 0.0f) ? 2.0f * PI : 0.0f);
-    float arctan_radian = (bowl_x != 0.0f) ? atan (-bowl_y / bowl_x) : ((bowl_y >= 0.0f) ? -PI / 2.0f : PI / 2.0f);
+    float offset_radian = (bowl_x < 0.0f) ? XCAM_PI : ((bowl_y >= 0.0f) ? 2.0f * XCAM_PI : 0.0f);
+    float arctan_radian = (bowl_x != 0.0f) ? atan (-bowl_y / bowl_x) : ((bowl_y >= 0.0f) ? -XCAM_PI / 2.0f : XCAM_PI / 2.0f);
 
     float img_x = arctan_radian + offset_radian;
-    img_x *= img_width / (2.0f * PI);
+    img_x *= img_width / (2.0f * XCAM_PI);
     return XCAM_CLAMP (img_x, 0.0f, img_width - 1.0f);
 }
 
@@ -95,10 +95,10 @@ PointFloat3 bowl_view_image_to_world (
     float b = config.b;
     float c = config.c;
 
-    float wall_image_height = config.wall_height / (float)(config.wall_height + config.ground_length) * (float)img_height;
-    float ground_image_height = (float)img_height - wall_image_height;
+    float wall_image_height = config.wall_height / (config.wall_height + config.ground_length) * img_height;
+    float ground_image_height = img_height - wall_image_height;
 
-    float z_step = (float)config.wall_height / wall_image_height;
+    float z_step = config.wall_height / wall_image_height;
     float angle_step = fabs(config.angle_end - config.angle_start) / img_width;
 
     if(img_pos.y < wall_image_height) {
@@ -106,13 +106,13 @@ PointFloat3 bowl_view_image_to_world (
         angle = degree2radian (config.angle_start + img_pos.x * angle_step);
         float r2 = 1 - (world.z - config.center_z) * (world.z - config.center_z) / (c * c);
 
-        if(XCAM_DOUBLE_EQUAL_AROUND (angle, PI / 2)) {
+        if(XCAM_DOUBLE_EQUAL_AROUND (angle, XCAM_PI / 2)) {
             world.x = 0.0f;
             world.y = -sqrt(r2 * b * b);
-        } else if (XCAM_DOUBLE_EQUAL_AROUND (angle, PI * 3 / 2)) {
+        } else if (XCAM_DOUBLE_EQUAL_AROUND (angle, XCAM_PI * 3 / 2)) {
             world.x = 0.0f;
             world.y = sqrt(r2 * b * b);
-        } else if((angle < PI / 2) || (angle > PI * 3 / 2)) {
+        } else if((angle < XCAM_PI / 2) || (angle > XCAM_PI * 3 / 2)) {
             world.x = sqrt(r2 * a * a * b * b / (b * b + a * a * tan(angle) * tan(angle)));
             world.y = -world.x * tan(angle);
         } else {
@@ -124,7 +124,6 @@ PointFloat3 bowl_view_image_to_world (
         b = b * sqrt(1 - config.center_z * config.center_z / (c * c));
 
         float ratio_ab = b / a;
-
         float step_b = config.ground_length / ground_image_height;
 
         b = b - (img_pos.y - wall_image_height) * step_b;
@@ -132,13 +131,13 @@ PointFloat3 bowl_view_image_to_world (
 
         angle = degree2radian (config.angle_start + img_pos.x * angle_step);
 
-        if(XCAM_DOUBLE_EQUAL_AROUND (angle, PI / 2)) {
+        if(XCAM_DOUBLE_EQUAL_AROUND (angle, XCAM_PI / 2)) {
             world.x = 0.0f;
             world.y = -b;
-        } else if (XCAM_DOUBLE_EQUAL_AROUND (angle, PI * 3 / 2)) {
+        } else if (XCAM_DOUBLE_EQUAL_AROUND (angle, XCAM_PI * 3 / 2)) {
             world.x = 0.0f;
             world.y = b;
-        } else if((angle < PI / 2) || (angle > PI * 3 / 2)) {
+        } else if((angle < XCAM_PI / 2) || (angle > XCAM_PI * 3 / 2)) {
             world.x = a * b / sqrt(b * b + a * a * tan(angle) * tan(angle));
             world.y = -world.x * tan(angle);
         } else {
@@ -193,13 +192,13 @@ linear_interpolate_p2 (
     if (dist_start == 0) {
         weight_start = 10000000.0;
     } else {
-        weight_start = ((double)dist_sum / dist_start);
+        weight_start = (dist_sum / dist_start);
     }
 
     if (dist_end == 0) {
         weight_end = 10000000.0;
     } else {
-        weight_end = ((double)dist_sum / dist_end);
+        weight_end = (dist_sum / dist_end);
     }
 
     value = (value_start * weight_start + value_end * weight_end) / (weight_start + weight_end);
@@ -227,36 +226,35 @@ linear_interpolate_p4(
     double dist_sum = 0;
     double value = 0;
 
-    dist_lt = (double)abs(ref_curr_x - ref_lt_x) + (double)abs(ref_curr_y - ref_lt_y);
-    dist_rt = (double)abs(ref_curr_x - ref_rt_x) + (double)abs(ref_curr_y - ref_rt_y);
-    dist_lb = (double)abs(ref_curr_x - ref_lb_x) + (double)abs(ref_curr_y - ref_lb_y);
-    dist_rb = (double)abs(ref_curr_x - ref_rb_x) + (double)abs(ref_curr_y - ref_rb_y);
+    dist_lt = abs(ref_curr_x - ref_lt_x) + abs(ref_curr_y - ref_lt_y);
+    dist_rt = abs(ref_curr_x - ref_rt_x) + abs(ref_curr_y - ref_rt_y);
+    dist_lb = abs(ref_curr_x - ref_lb_x) + abs(ref_curr_y - ref_lb_y);
+    dist_rb = abs(ref_curr_x - ref_rb_x) + abs(ref_curr_y - ref_rb_y);
     dist_sum = dist_lt + dist_rt + dist_lb + dist_rb;
 
     if (dist_lt == 0) {
         weight_lt = 10000000.0;
     } else {
-        weight_lt = ((float)dist_sum / dist_lt);
+        weight_lt = (dist_sum / dist_lt);
     }
     if (dist_rt == 0) {
         weight_rt = 10000000.0;
     } else {
-        weight_rt = ((float)dist_sum / dist_rt);
+        weight_rt = (dist_sum / dist_rt);
     }
     if (dist_lb == 0) {
         weight_lb = 10000000.0;
     } else {
-        weight_lb = ((float)dist_sum / dist_lb);
+        weight_lb = (dist_sum / dist_lb);
     }
     if (dist_rb == 0) {
         weight_rb = 10000000.0;
     } else {
-        weight_rb = ((float)dist_sum / dist_rt);
+        weight_rb = (dist_sum / dist_rt);
     }
 
-    value = (double)floor ( (value_lt * weight_lt + value_rt * weight_rt +
-                             value_lb * weight_lb + value_rb * weight_rb) /
-                            (weight_lt + weight_rt + weight_lb + weight_rb) + 0.5 );
+    value = floor ((value_lt * weight_lt + value_rt * weight_rt + value_lb * weight_lb + value_rb * weight_rb) /
+                   (weight_lt + weight_rt + weight_lb + weight_rb) + 0.5);
     return value;
 }
 
@@ -272,7 +270,7 @@ get_gauss_table (uint32_t radius, float sigma, std::vector<float> &table, bool n
     table[radius] = 1.0f;
 
     for (i = 0; i < radius; i++)  {
-        dis = ((float)i - radius) * ((float)i - radius);
+        dis = (i - radius) * (i - radius);
         table[i] = table[scale - i - 1] = exp(-dis / (2.0f * sigma * sigma));
         sum += table[i] * 2.0f;
     }

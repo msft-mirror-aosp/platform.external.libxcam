@@ -41,7 +41,7 @@
 #include "gstxcaminterface.h"
 #include "dynamic_analyzer_loader.h"
 #include "isp/hybrid_analyzer_loader.h"
-#include "x3a_analyze_tuner.h"
+#include "isp/iq/x3a_analyze_tuner.h"
 #include "isp/isp_poll_thread.h"
 #endif
 #if HAVE_LIBCL
@@ -83,6 +83,8 @@ using namespace GstXCam;
 #define DEFAULT_PROP_IMAGE_PROCESSOR    ISP_IMAGE_PROCESSOR
 #elif HAVE_LIBCL
 #define DEFAULT_PROP_IMAGE_PROCESSOR    CL_IMAGE_PROCESSOR
+#else
+#define DEFAULT_PROP_IMAGE_PROCESSOR    NONE_IMAGE_PROCESSOR
 #endif
 #if HAVE_LIBCL
 #define DEFAULT_PROP_WDR_MODE           NONE_WDR
@@ -633,8 +635,11 @@ gst_xcam_src_init (GstXCamSrc *xcamsrc)
     xcamsrc->xcam_video_info.init (DEFAULT_PROP_PIXELFORMAT, DEFAULT_VIDEO_WIDTH, DEFAULT_VIDEO_HEIGHT);
     xcamsrc->image_processor_type = DEFAULT_PROP_IMAGE_PROCESSOR;
     xcamsrc->analyzer_type = DEFAULT_PROP_ANALYZER;
+
     XCAM_CONSTRUCTOR (xcamsrc->device_manager, SmartPtr<MainDeviceManager>);
-    xcamsrc->device_manager = new MainDeviceManager;
+    SmartPtr<MainDeviceManager> device_manager = new MainDeviceManager;
+    XCAM_ASSERT (device_manager.ptr ());
+    xcamsrc->device_manager = device_manager;
 }
 
 static void
@@ -913,11 +918,6 @@ gst_xcam_src_start (GstBaseSrc *src)
     SmartPtr<ImageProcessor> isp_processor;
     SmartPtr<IspController> isp_controller;
 #endif
-#if HAVE_LIBCL
-    SmartPtr<SmartAnalyzer> smart_analyzer;
-    SmartPtr<CL3aImageProcessor> cl_processor;
-    SmartPtr<CLPostImageProcessor> cl_post_processor;
-#endif
     SmartPtr<V4l2Device> capture_device;
     SmartPtr<V4l2SubDevice> event_device;
     SmartPtr<PollThread> poll_thread;
@@ -980,13 +980,15 @@ gst_xcam_src_start (GstBaseSrc *src)
         XCAM_ASSERT (isp_processor.ptr ());
         device_manager->add_image_processor (isp_processor);
 #endif
-        cl_processor = new CL3aImageProcessor ();
+
+        SmartPtr<CL3aImageProcessor> cl_processor = new CL3aImageProcessor ();
+        XCAM_ASSERT (cl_processor.ptr ());
         cl_processor->set_stats_callback (device_manager);
         if(xcamsrc->wdr_mode_type != NONE_WDR)
         {
             cl_processor->set_gamma (false);
             xcamsrc->in_format = V4L2_PIX_FMT_SGRBG12;
-            cl_processor->set_3a_stats_bits(12);
+            cl_processor->set_3a_stats_bits (12);
             setenv ("AIQ_CPF_PATH", "/etc/atomisp/imx185_wdr.cpf", 1);
 
             if(xcamsrc->wdr_mode_type == GAUSSIAN_WDR)
@@ -1018,7 +1020,8 @@ gst_xcam_src_start (GstBaseSrc *src)
     }
 
 #if HAVE_LIBCL
-    cl_post_processor = new CLPostImageProcessor ();
+    SmartPtr<CLPostImageProcessor> cl_post_processor = new CLPostImageProcessor ();
+    XCAM_ASSERT (cl_post_processor.ptr ());
 
     cl_post_processor->set_stats_callback (device_manager);
     cl_post_processor->set_defog_mode ((CLPostImageProcessor::CLDefogMode) xcamsrc->defog_mode);
@@ -1110,6 +1113,7 @@ gst_xcam_src_start (GstBaseSrc *src)
     device_manager->set_3a_analyzer (analyzer);
 
 #if HAVE_LIBCL
+    SmartPtr<SmartAnalyzer> smart_analyzer;
     SmartHandlerList smart_handlers = SmartAnalyzerLoader::load_smart_handlers (DEFAULT_SMART_ANALYSIS_LIB_DIR);
     if (!smart_handlers.empty ()) {
         smart_analyzer = new SmartAnalyzer ();
@@ -1219,7 +1223,7 @@ translate_format_to_xcam (GstVideoFormat format)
     case GST_VIDEO_FORMAT_Y42B:
         return V4L2_PIX_FMT_YUV422P;
 
-        //RGB
+    //RGB
     case GST_VIDEO_FORMAT_RGBx:
         return V4L2_PIX_FMT_RGB32;
     case GST_VIDEO_FORMAT_BGRx:
@@ -1733,5 +1737,5 @@ GST_PLUGIN_DEFINE (
     VERSION,
     GST_LICENSE_UNKNOWN,
     "libxcamsrc",
-    "https://github.com/01org/libxcam"
+    "https://github.com/intel/libxcam"
 )

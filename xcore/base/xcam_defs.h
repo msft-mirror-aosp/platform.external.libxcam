@@ -72,8 +72,16 @@
 #define XCAM_FAIL_RETURN(LEVEL, exp, ret, msg, ...)         \
     if (!(exp)) {                                           \
         XCAM_LOG_##LEVEL (msg, ## __VA_ARGS__);             \
-        return (ret);                                       \
+        return ret;                                         \
     }
+
+#define XCAM_RETURN_CHECK(LEVEL, exp, msg, ...)             \
+    do {                                                    \
+    XCamReturn err_ret = (exp);                             \
+    XCAM_FAIL_RETURN(LEVEL, xcam_ret_is_ok(err_ret),        \
+        err_ret, msg, ## __VA_ARGS__);                      \
+    } while (0)
+
 
 #define XCAM_DEAD_COPY(ClassObj)                \
         ClassObj (const ClassObj&);             \
@@ -119,7 +127,10 @@
 #define PRIuS "u"
 #endif
 
-#define PI 3.1415926f
-#define degree2radian(degree) ((degree) * PI / 180.0f)
+#ifndef XCAM_PI
+#define XCAM_PI 3.1415926f
+#endif
+
+#define degree2radian(degree) ((degree) * XCAM_PI / 180.0f)
 
 #endif //XCAM_DEFS_H

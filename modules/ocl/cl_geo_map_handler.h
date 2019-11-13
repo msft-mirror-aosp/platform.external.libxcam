@@ -52,6 +52,10 @@ protected:
     virtual SmartPtr<CLImage> get_lsc_table () = 0;
     virtual float* get_lsc_gray_threshold() = 0;
 
+    virtual PointFloat2 get_left_scale_factor () = 0;
+    virtual PointFloat2 get_right_scale_factor () = 0;
+
+    virtual float get_stable_y_start () = 0;
 private:
     XCAM_DEAD_COPY (GeoKernelParamCallback);
 };
@@ -64,7 +68,7 @@ public:
     explicit CLGeoMapKernel (
         const SmartPtr<CLContext> &context,
         const SmartPtr<GeoKernelParamCallback> handler,
-        bool need_lsc);
+        bool need_lsc, bool need_scale);
 
 protected:
     virtual XCamReturn prepare_arguments (CLArgList &args, CLWorkSize &work_size);
@@ -72,6 +76,7 @@ protected:
 private:
     SmartPtr<GeoKernelParamCallback>   _handler;
     bool                               _need_lsc;
+    bool                               _need_scale;
 };
 
 class CLGeoMapHandler
@@ -122,6 +127,22 @@ protected:
         return NULL;
     }
 
+    virtual PointFloat2 get_left_scale_factor () {
+        XCAM_ASSERT (false && "CLGeoMapHandler::left_scale_factor is not supported");
+        return PointFloat2 (0.0f, 0.0f);
+    }
+
+    virtual PointFloat2 get_right_scale_factor () {
+        XCAM_ASSERT (false && "CLGeoMapHandler::right_scale_factor is not supported");
+        return PointFloat2 (0.0f, 0.0f);
+    }
+
+    virtual float get_stable_y_start () {
+        XCAM_ASSERT (false && "CLGeoMapHandler::get_stable_y_start is not supported");
+        return 0.0f;
+    }
+
+
 protected:
     virtual XCamReturn prepare_buffer_pool_video_info (
         const VideoBufferInfo &input,
@@ -150,10 +171,10 @@ private:
 
 SmartPtr<CLImageKernel>
 create_geo_map_kernel (
-    const SmartPtr<CLContext> &context, SmartPtr<GeoKernelParamCallback> param_cb, bool need_lsc);
+    const SmartPtr<CLContext> &context, SmartPtr<GeoKernelParamCallback> param_cb, bool need_lsc, bool need_scale);
 
 SmartPtr<CLImageHandler>
-create_geo_map_handler (const SmartPtr<CLContext> &context, bool need_lsc = false);
+create_geo_map_handler (const SmartPtr<CLContext> &context, bool need_lsc = false, bool need_scale = false);
 
 }
 
